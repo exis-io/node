@@ -178,9 +178,9 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) {
 func (d *defaultDealer) lostSession(sess Session) {
 	rem := make([]URI, 0)
 
-	for k, v := range d.registrations {
+	for k, _ := range d.registrations {
 		if strings.Contains(string(k), string(sess.pdid)+"/") {
-			out.Debug("Deleting %s %s", k, v)
+			// out.Debug("Deleting %s %s", k, v)
 			rem = append(rem, k)
 		}
 	}

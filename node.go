@@ -31,6 +31,8 @@ func NewNode() Router {
 	// They still have to create a peer (self) and ask for an identity
 
 	// Here we assume *one* router as root and a default pd namespace
+	// Router should identify itself based on its root certificate, for now
+	// just set a constant name
 	realm := Realm{URI: "pd"}
 	realm.init()
 
@@ -50,16 +52,13 @@ func NewNode() Router {
 
 	node.agent = node.localClient("pd")
 
-	h := func(args []interface{}, kwargs map[string]interface{}) {
-		out.Warning("Got a pub on the local session!")
-	}
+	// Subscribe to meta-level events here
+	// TODO: create new object to handle this, no inline
+	// h := func(args []interface{}, kwargs map[string]interface{}) {
+	// 	out.Warning("Got a pub on the local session!")
+	// }
 
-	// NOTE: this works, but looks like an error with the extraction and parsing code
-	// when published on this endpoint.
-	node.agent.Subscribe("pd/hello", h)
-
-	// What does a provisioning process look like? Where does the router get its name?
-	// what is OUR name?
+	// node.agent.Subscribe("pd/hello", h)
 
 	return node
 }
@@ -96,11 +95,7 @@ func (r *node) Close() error {
 
 	r.closing = true
 	r.closeLock.Unlock()
-
 	r.realm.Close()
-	// for _, realm := range r.realms {
-	// 	realm.Close()
-	// }
 
 	return nil
 }
@@ -175,7 +170,7 @@ func Listen(node *node, sess Session) {
 // Very new code
 ////////////////////////////////////////
 
-// Handle a new Peer
+// Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
 	sess := Session{}
 
@@ -191,10 +186,10 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, err
 	}
 
-	hello, _ := msg.(*Hello)
+	hello, msgOk := msg.(*Hello)
 
 	// Ensure the message is valid and well constructed
-	if _, ok := msg.(*Hello); !ok {
+	if !msgOk {
 		logErr(client.Send(&Abort{Reason: URI("wamp.error.protocol_violation")}))
 		logErr(client.Close())
 
@@ -237,7 +232,6 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	out.Notice("Established session: ", hello.Realm)
-	// //log.Println("Established session: ", welcome.Id)
 
 	sess = Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
 	return sess, nil
@@ -256,9 +250,6 @@ func (n *node) SessionClose(sess Session) {
 	// for _, callback := range n.sessionCloseCallbacks {
 	//     go callback(uint(sess.Id), string(hello.Realm))
 	// }
-
-	// Check if any realms need to be closed
-	// Check if any registrations or pubs need to be purged
 }
 
 // Handle a new message

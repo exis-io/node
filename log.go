@@ -1,9 +1,10 @@
 package rabric
 
 import (
-	"github.com/op/go-logging"
 	glog "log"
 	"os"
+
+	"github.com/op/go-logging"
 	// "fmt"
 	// "io/ioutil"
 )
@@ -71,7 +72,7 @@ func Log() {
 }
 
 func SetLogger(l Logger) {
-	log = l
+	// log = l
 }
 
 func logErr(err error) error {

@@ -496,6 +496,7 @@ func (c *Client) Call(procedure string, args []interface{}, kwargs map[string]in
 		Arguments:   args,
 		ArgumentsKw: kwargs,
 	}
+
 	if err := c.Send(call); err != nil {
 		return nil, err
 	}
