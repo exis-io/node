@@ -1,0 +1,134 @@
+package rabric
+
+import "strconv"
+
+// A broker handles routing EVENTS from Publishers to Subscribers.
+type Broker interface {
+	// Publishes a message to all Subscribers.
+	Publish(Sender, *Publish)
+	// Subscribes to messages on a URI.
+	Subscribe(Sender, *Subscribe)
+	// Unsubscribes from messages on a URI.
+	Unsubscribe(Sender, *Unsubscribe)
+	dump() string
+	hasSubscription(string) bool
+	lostSession(Session)
+}
+
+// A super simple broker that matches URIs to Subscribers.
+type defaultBroker struct {
+	routes        map[URI]map[ID]Sender
+	subscriptions map[ID]URI
+}
+
+// NewDefaultBroker initializes and returns a simple broker that matches URIs to Subscribers.
+func NewDefaultBroker() Broker {
+	return &defaultBroker{
+		routes:        make(map[URI]map[ID]Sender),
+		subscriptions: make(map[ID]URI),
+	}
+}
+
+// Publish sends a message to all subscribed clients except for the sender.
+//
+// If msg.Options["acknowledge"] == true, the publisher receives a Published event
+// after the message has been sent to all subscribers.
+func (br *defaultBroker) Publish(pub Sender, msg *Publish) {
+	pubId := NewID()
+
+	evtTemplate := Event{
+		Publication: pubId,
+		Arguments:   msg.Arguments,
+		ArgumentsKw: msg.ArgumentsKw,
+		Details:     make(map[string]interface{}),
+	}
+
+	for id, sub := range br.routes[msg.Topic] {
+		// shallow-copy the template
+		event := evtTemplate
+		event.Subscription = id
+		// don't send event to publisher
+		if sub != pub {
+			sub.Send(&event)
+		}
+	}
+
+	// only send published message if acknowledge is present and set to true
+	if doPub, _ := msg.Options["acknowledge"].(bool); doPub {
+		pub.Send(&Published{Request: msg.Request, Publication: pubId})
+	}
+}
+
+// Subscribe subscribes the client to the given topic.
+func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
+	if _, ok := br.routes[msg.Topic]; !ok {
+		br.routes[msg.Topic] = make(map[ID]Sender)
+	}
+
+	id := NewID()
+	br.routes[msg.Topic][id] = sub
+
+	br.subscriptions[id] = msg.Topic
+
+	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
+}
+
+func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
+	topic, ok := br.subscriptions[msg.Subscription]
+	if !ok {
+		err := &Error{
+			Type:    msg.MessageType(),
+			Request: msg.Request,
+			Error:   ErrNoSuchSubscription,
+		}
+		sub.Send(err)
+		//log.Printf("Error unsubscribing: no such subscription %v", msg.Subscription)
+		return
+	}
+
+	delete(br.subscriptions, msg.Subscription)
+
+	if r, ok := br.routes[topic]; !ok {
+		//log.Printf("Error unsubscribing: unable to find routes for %s topic", topic)
+	} else if _, ok := r[msg.Subscription]; !ok {
+		//log.Printf("Error unsubscribing: %s route does not exist for %v subscription", topic, msg.Subscription)
+	} else {
+		delete(r, msg.Subscription)
+		if len(r) == 0 {
+			delete(br.routes, topic)
+		}
+	}
+
+	sub.Send(&Unsubscribed{Request: msg.Request})
+}
+
+// Remove all the subs for a session that has disconected
+func (br *defaultBroker) lostSession(sess Session) {
+
+}
+
+func (b *defaultBroker) dump() string {
+	ret := "  routes:"
+
+	for k, v := range b.routes {
+		ret += "\n\t" + string(k)
+
+		for x, _ := range v {
+			ret += "\n\t  " + strconv.FormatUint(uint64(x), 16)
+		}
+	}
+
+	ret += "\n  subs:"
+
+	for k, v := range b.subscriptions {
+		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + string(v)
+	}
+
+	return ret
+}
+
+// Testing. Not sure if this works 100 or not
+func (b *defaultBroker) hasSubscription(s string) bool {
+	_, exists := b.routes[URI(s)]
+	return exists
+}
