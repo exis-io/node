@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/damouse/rabric"
+	"github.com/ParadropLabs/node"
 )
 
 var client *rabric.Client
