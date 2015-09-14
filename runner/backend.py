@@ -54,8 +54,8 @@ class Component(ApplicationSession):
 
 if __name__ == '__main__':
     runner = ApplicationRunner(
-        "ws://127.0.0.1:8000/ws",
-        # "ws://paradrop.io:9000/ws",
+        # "ws://127.0.0.1:9000/ws",
+        "ws://paradrop.io:8000/ws",
         u"pd.damouse",
         debug_wamp=False,  # optional; log many WAMP details
         debug=False,  # optional; log even more details

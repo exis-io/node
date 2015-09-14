@@ -268,7 +268,18 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 		// Return a WAMP error to the user indicating a poorly constructed endpoint
 		if err != nil {
-			out.Error("Misconstructed endpoint. Dont know what to do now!")
+			out.Error("Misconstructed endpoint: %s", msg)
+			m := *msg
+
+			err := &Error{
+				Type:    m.MessageType(),
+				Request: m.Requst,
+				Details: map[string]interface{}{"Invalid Endpoint": "Poorly constructed endpoint."},
+				Error:   ErrInvalidUri,
+			}
+
+			sess.Peer.Send(err)
+
 			return
 		}
 
