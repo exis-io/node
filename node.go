@@ -113,7 +113,7 @@ func (r *node) Accept(client Peer) error {
 	}
 
 	// sess := Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
-	out.Notice("Established session: ", sess.pdid)
+	// out.Notice("Established session: ", sess.pdid)
 
 	// Meta level start events
 	// for _, callback := range r.sessionOpenCallbacks {
@@ -231,7 +231,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, err
 	}
 
-	out.Notice("Established session: ", hello.Realm)
+	out.Notice("Handshake session: ", hello.Realm)
 
 	sess = Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
 	return sess, nil
