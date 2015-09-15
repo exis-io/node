@@ -231,7 +231,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, err
 	}
 
-	out.Notice("Handshake session: ", hello.Realm)
+	out.Notice("Session open: [%s]", string(hello.Realm))
 
 	sess = Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
 	return sess, nil
@@ -240,7 +240,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 // Called when a session is closed or closes itself
 func (n *node) SessionClose(sess Session) {
 	sess.Close()
-	out.Notice("Session %s closed", sess)
+	out.Notice("Session close: [%s]", sess)
 
 	// Did these really not exist before? Doesn't seem likely, but can't find them
 	n.realm.Dealer.lostSession(sess)
