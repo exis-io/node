@@ -240,7 +240,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 // Called when a session is closed or closes itself
 func (n *node) SessionClose(sess Session) {
 	sess.Close()
-	out.Info("Session %s closed", sess)
+	out.Notice("Session %s closed", sess)
 
 	// Did these really not exist before? Doesn't seem likely, but can't find them
 	n.realm.Dealer.lostSession(sess)
