@@ -32,7 +32,7 @@ func (n noopLogger) Printf(format string, v ...interface{}) {
 
 // Check out their github page for more info on the coloring
 var format = logging.MustStringFormatter(
-	"%{color}[%{longfunc}]  %{message}",
+	"%{color}[%{longfunc}]  %{message}%{color:reset}",
 	// "[%{color}%{time:15:04:05.000} %{longfunc}]  %{message}",
 )
 
