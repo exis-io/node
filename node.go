@@ -270,14 +270,12 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		if err != nil {
 			out.Error("Misconstructed endpoint: %s", msg)
 			m := *msg
-
 			err := &Error{
 				Type:    m.MessageType(),
-				Request: m.Requst,
+				Request: sess.Id,
 				Details: map[string]interface{}{"Invalid Endpoint": "Poorly constructed endpoint."},
 				Error:   ErrInvalidUri,
 			}
-
 			sess.Peer.Send(err)
 
 			return
