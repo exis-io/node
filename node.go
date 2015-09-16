@@ -58,9 +58,14 @@ func NewNode() Router {
 	// 	out.Warning("Got a pub on the local session!")
 	// }
 
-	// node.agent.Subscribe("pd/hello", h)
+	// node.agent.Subscribe("pd/hello", node.cb)
 
 	return node
+}
+
+// Testing method to ensure that structs can be receivers for Riffle traffic
+func (n *node) cb(args []interface{}, kwargs map[string]interface{}) {
+	out.Notice("Pub on local session!")
 }
 
 func (n *node) localClient(s string) *Client {
@@ -258,8 +263,13 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
 
+	// Make errors nice and pretty
 	m := *msg
-	out.Debug("[%s] %s: %+v", *sess, m.MessageType(), *msg)
+	if m.MessageType() == ERROR {
+		out.Warning("[%s] %s: %+v", *sess, m.MessageType(), *msg)
+	} else {
+		out.Debug("[%s] %s: %+v", *sess, m.MessageType(), *msg)
+	}
 
 	if uri, ok := destination(msg); ok == nil {
 		// Ensure the construction of the message is valid, extract the endpoint, domain, and action
@@ -276,6 +286,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 				Details: map[string]interface{}{"Invalid Endpoint": "Poorly constructed endpoint."},
 				Error:   ErrInvalidUri,
 			}
+
 			sess.Peer.Send(err)
 
 			return
@@ -283,7 +294,17 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 		// out.Debug("Extracted: %s %s \n", domain, action)
 
+		// Downward domain action? That is, endpoint is a subdomain of the current agent?
 		if !n.Permitted(msg, sess) {
+			// Check cache for previously allowed downward permission
+			// TODO
+
+			// Check with bouncer on permissions check
+			// exists := n.realm.hasSubscription("pd/pong")
+			exists := n.realm.hasRegistration("pd/pong")
+			out.Debug("Registration for bouncer permissions exist: %s ", exists)
+
+			// Action is not permitted
 			out.Error("Operation not permitted! TODO: return an error here!")
 			return
 		}
@@ -304,7 +325,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			if exists {
 				out.Critical("Sending blind pub on pd/pong")
 
-				n.agent.Publish("pd/pong", nil, nil)
+				ret := n.agent.Publish("pd/pong", nil, nil)
+				out.Critical("Result of blind pub: %s", ret)
 			}
 		}
 

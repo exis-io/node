@@ -46,6 +46,7 @@ type Router interface {
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
 	AddSessionOpenCallback(func(uint, string))
 	AddSessionCloseCallback(func(uint, string))
+	cb([]interface{}, map[string]interface{})
 }
 
 // DefaultRouter is the default WAMP router implementation.
@@ -55,6 +56,10 @@ type defaultRouter struct {
 	closeLock             sync.Mutex
 	sessionOpenCallbacks  []func(uint, string)
 	sessionCloseCallbacks []func(uint, string)
+}
+
+func (n *defaultRouter) cb(args []interface{}, kwargs map[string]interface{}) {
+	out.Notice("Pub on local session!")
 }
 
 // NewDefaultRouter creates a very basic WAMP router.

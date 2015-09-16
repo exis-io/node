@@ -35,6 +35,8 @@ class Component(ApplicationSession):
     def onJoin(self, details):
         print "session attached"
 
+        # yield self.publish('pd/hello')
+
         yield self.register(callAdd, 'pd.damouse/add')
         yield self.register(kill, 'pd.damouse/kill')
 
@@ -49,13 +51,16 @@ class Component(ApplicationSession):
         # and the frontend to receive a blind pub on the second on e
         yield self.publish('pd/ping')
 
+        # Trigger node-internal testing
+        yield self.publish('pd/hello')
+
         print "procedures registered"
 
 
 if __name__ == '__main__':
     runner = ApplicationRunner(
-        # "ws://127.0.0.1:9000/ws",
-        "ws://paradrop.io:8000/ws",
+        "ws://127.0.0.1:8000/ws",
+        # "ws://paradrop.io:8000/ws",
         u"pd.damouse",
         debug_wamp=False,  # optional; log many WAMP details
         debug=False,  # optional; log even more details
