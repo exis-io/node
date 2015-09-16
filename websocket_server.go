@@ -2,7 +2,6 @@ package rabric
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -46,7 +45,7 @@ type WebsocketServer struct {
 
 // Creates a new WebsocketServer from a map of realms
 func NewWebsocketServer(realms map[string]Realm) (*WebsocketServer, error) {
-	// //log.Println("NewWebsocketServer")
+	out.Debug("NewWebsocketServer")
 
 	r := NewNode()
 
@@ -73,7 +72,9 @@ func newWebsocketServer(r Router) *WebsocketServer {
 		protocols: make(map[string]protocol),
 	}
 
-	s.Upgrader = &websocket.Upgrader{}
+	s.Upgrader = &websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
 	s.RegisterProtocol(jsonWebsocketProtocol, websocket.TextMessage, new(JSONSerializer))
 	s.RegisterProtocol(msgpackWebsocketProtocol, websocket.BinaryMessage, new(MessagePackSerializer))
 
@@ -82,7 +83,7 @@ func newWebsocketServer(r Router) *WebsocketServer {
 
 // RegisterProtocol registers a serializer that should be used for a given protocol string and payload type.
 func (s *WebsocketServer) RegisterProtocol(proto string, payloadType int, serializer Serializer) error {
-	log.Println("RegisterProtocol:", proto)
+	out.Debug("RegisterProtocol:", proto)
 
 	if payloadType != websocket.TextMessage && payloadType != websocket.BinaryMessage {
 		return invalidPayload(payloadType)
@@ -99,6 +100,7 @@ func (s *WebsocketServer) RegisterProtocol(proto string, payloadType int, serial
 
 // GetLocalClient returns a client connected to the specified realm
 func (s *WebsocketServer) GetLocalClient(realm string, details map[string]interface{}) (*Client, error) {
+	out.Debug("Request for local client for realm: %s", realm)
 	if peer, err := s.Router.GetLocalPeer(URI(realm), details); err != nil {
 		return nil, err
 	} else {
@@ -110,11 +112,13 @@ func (s *WebsocketServer) GetLocalClient(realm string, details map[string]interf
 
 // ServeHTTP handles a new HTTP connection.
 func (s *WebsocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Println("WebsocketServer.ServeHTTP", r.Method, r.RequestURI)
+	out.Debug("WebsocketServer.ServeHTTP", r.Method, r.RequestURI)
+
 	// TODO: subprotocol?
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
+
 	if err != nil {
-		//log.Println("Error upgrading to websocket connection:", err)
+		out.Critical("Error upgrading to websocket connection:", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -123,6 +127,7 @@ func (s *WebsocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebsocketServer) handleWebsocket(conn *websocket.Conn) {
+	out.Debug("New WS connection: %s", conn)
 	var serializer Serializer
 	var payloadType int
 	if proto, ok := s.protocols[conn.Subprotocol()]; ok {
