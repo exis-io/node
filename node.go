@@ -12,11 +12,12 @@ type node struct {
 	sessionOpenCallbacks  []func(uint, string)
 	sessionCloseCallbacks []func(uint, string)
 	realm                 Realm
-	sessionPdid           map[string]string
-	nodes                 map[string]Session
-	forwarding            map[string]Session
-	permissions           map[string]string
 	agent                 *Client
+	// sessionPdid           map[string]string
+	// nodes                 map[string]Session
+	// forwarding            map[string]Session
+	// permissions           map[string]string
+	// agent                 *Client
 }
 
 // NewDefaultRouter creates a very basic WAMP router.
@@ -101,17 +102,6 @@ func (r *node) Accept(client Peer) error {
 		return ok
 	}
 
-	// sess := Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
-	// out.Notice("Established session: ", sess.pdid)
-
-	// Meta level start events
-	// for _, callback := range r.sessionOpenCallbacks {
-	// 	go callback(uint(sess.Id), string(hello.Realm))
-	// }
-
-	// OLD CODE: need the original realm to handle issues with default
-	// realm := r.getDomain(sess.pdid)
-
 	// Start listening on the session
 	// This will eventually move to the session
 	go Listen(r, sess)
@@ -185,12 +175,10 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
 
-	// get the appropriate domain
-	// realm := n.getDomain(hello.Realm)
-	// realm :=
-
 	// Old implementation: the authentication must occur before fetching the realm
 	welcome, err := n.realm.handleAuth(client, hello.Details)
+
+	// Check to make sure PDID is not already registered
 
 	if err != nil {
 		abort := &Abort{
@@ -276,7 +264,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		}
 
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
-		if !n.Permitted(msg, sess) {
+		if !n.Permitted(uri, sess) {
+			out.Warning("Action not allowed: %s:%s", sess.pdid, uri)
 			return
 		}
 
@@ -289,9 +278,9 @@ func (n *node) Handle(msg *Message, sess *Session) {
 }
 
 // Return true or false based on the message and the session which sent the message
-func (n *node) Permitted(msg *Message, sess *Session) bool {
+func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	// TODO: allow all core appliances to perform whatever they want
-	if sess.pdid == "pd.bouncer" {
+	if sess.pdid == "pd.bouncer" || sess.pdid == "pd.map" || sess.pdid == "pd.auth" {
 		return true
 	}
 
@@ -306,29 +295,30 @@ func (n *node) Permitted(msg *Message, sess *Session) bool {
 	// Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
-	// if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
-	// 	ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
+	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
+		args := []interface{}{string(sess.pdid), string(endpoint)}
+		// args := []string{"a", "b", "c", "d"}
 
-	// 	if err != nil {
-	// 		out.Critical("Error, returning true: %s", err)
-	// 		return true
-	// 	}
+		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
 
-	// 	if permitted, ok := ret.Arguments[0].(bool); ok {
-	// 		// out.Debug("Bouncer returning %s", permitted)
-	// 		// TODO: save a permitted action in some flavor of cache
-	// 		return permitted
-	// 	} else {
-	// 		out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
-	// 		return true
-	// 	}
-	// } else {
-	// 	out.Critical("No bouncer registered. Action not permitted.")
+		if err != nil {
+			out.Critical("Error, returning true: %s", err)
+			return true
+		}
 
-	// }
+		if permitted, ok := ret.Arguments[0].(bool); ok {
+			// out.Debug("Bouncer returning %s", permitted)
+			// TODO: save a permitted action in some flavor of cache
+			return permitted
+		} else {
+			out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
+			return true
+		}
+	} else {
+		out.Warning("No bouncer registered!")
+	}
 
 	// Action is not permitted
-	out.Error("Operation not permitted!")
 	return false
 }
 
