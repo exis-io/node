@@ -75,7 +75,7 @@ func (n *node) localClient(s string) *Client {
 	// p, _ := n.GetLocalPeer(URI(s), nil)
 
 	client := NewClient(p)
-	client.ReceiveTimeout = 100 * time.Millisecond
+	client.ReceiveTimeout = 1000 * time.Millisecond
 	if _, err := client.JoinRealm(s, nil); err != nil {
 		out.Error("Error when creating new client: ", err)
 	}
@@ -337,31 +337,47 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	n.realm.handleMessage(*msg, *sess)
 }
 
-// Return true or false based on the message and the session which sent the messate
+// Return true or false based on the message and the session which sent the message
 func (n *node) Permitted(msg *Message, sess *Session) bool {
-	// The node's agent is always permitted to perform any action
+	// return true
+
+	// Special case: the bouncer is permitted to do this
+	if sess.pdid == "pd.bouncer" {
+		// out.Critical("Core appliance bouncer permitted access")
+		return true
+	}
+
+	// The node is always permitted to perform any action
 	if sess.pdid == n.agent.pdid {
-		out.Critical("Session agent performing action. Default allow.")
 		return true
 	}
 
 	// Is downward action? allow
-	// Check permissions cache: if found, allow
-	// Check with bouncer
-
-	// Check with bouncer on permissions check
-	exists := n.realm.hasRegistration("pd.bouncer/checkPerm")
-
-	if exists {
-		ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
-		out.Critical("Error: %s", err)
-		out.Critical("Permission exists, bouncer called and returnd: %s", ret)
-	}
-
 	return true
 
+	// Check permissions cache: if found, allow
+
+	// Check with bouncer on permissions check
+	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
+		ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
+
+		if err != nil {
+			out.Critical("Error, returning true: %s", err)
+			return true
+		}
+
+		if permitted, ok := ret.Arguments[0].(bool); ok {
+			// out.Debug("Bouncer returning %s", permitted)
+			// TODO: save a permitted action in some flavor of cache
+			return permitted
+		} else {
+			out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
+			return true
+		}
+	}
+
 	// Action is not permitted
-	out.Error("Operation not permitted! TODO: return an error here!")
+	out.Error("Operation not permitted!")
 	return false
 }
 

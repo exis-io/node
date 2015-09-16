@@ -29,7 +29,7 @@ class Component(ApplicationSession):
         yield self.subscribe(self.pong, 'pd/pong')
         yield self.publish('pd/ping')
 
-        # self.leave()
+        self.leave()
 
     def onDisconnect(self):
         print("disconnected")
