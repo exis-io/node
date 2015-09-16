@@ -336,8 +336,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		// n.CoreReady()
 
 	} else {
-		// //log.Printf("Unable to determine destination from message: %+v", *msg)
-		// out.Debug("Unable to determine destination from message: %+v", *msg)
+		out.Debug("Unable to determine destination from message: %+v", *msg)
 		// n.realm.handleMessage(*msg, *sess)
 	}
 

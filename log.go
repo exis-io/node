@@ -1,7 +1,6 @@
 package rabric
 
 import (
-	glog "log"
 	"os"
 
 	"github.com/op/go-logging"
@@ -9,26 +8,26 @@ import (
 	// "io/ioutil"
 )
 
-var (
-	logFlags = glog.Ldate | glog.Ltime | glog.Lshortfile
-	log      Logger
-)
+// var (
+// 	logFlags = glog.Ldate | glog.Ltime | glog.Lshortfile
+// 	// log      Logger
+// )
 
-// Logger is an interface compatible with log.Logger.
-type Logger interface {
-	Println(v ...interface{})
-	Printf(format string, v ...interface{})
-}
+// // Logger is an interface compatible with log.Logger.
+// type Logger interface {
+// 	Println(v ...interface{})
+// 	Printf(format string, v ...interface{})
+// }
 
-type noopLogger struct{}
+// type noopLogger struct{}
 
-func (n noopLogger) Println(v ...interface{}) {
+// func (n noopLogger) Println(v ...interface{}) {
 
-}
+// }
 
-func (n noopLogger) Printf(format string, v ...interface{}) {
-	// out.Notice(fmt.Sprintf(format, v...))
-}
+// func (n noopLogger) Printf(format string, v ...interface{}) {
+// 	// out.Notice(fmt.Sprintf(format, v...))
+// }
 
 // Check out their github page for more info on the coloring
 var format = logging.MustStringFormatter(
@@ -52,12 +51,13 @@ func Log() {
 	backend1Leveled := logging.AddModuleLevel(backend1)
 
 	if os.Getenv("DEBUG") != "" {
+		// out.Critical("DEBUG IS SET: %s", os.Getenv("DEBUG"))
 		backend1Leveled.SetLevel(logging.DEBUG, "")
 		// log = glog.New(ioutil.Discard, "", logFlags)
-		log = noopLogger{}
+		// log = noopLogger{}
 	} else {
 		backend1Leveled.SetLevel(logging.CRITICAL, "")
-		log = noopLogger{}
+		// log = noopLogger{}
 	}
 
 	// Set the backends to be used.
@@ -71,19 +71,20 @@ func Log() {
 	// out.Critical("crit")
 }
 
-func SetLogger(l Logger) {
-	// log = l
-}
+// func SetLogger(l Logger) {
+// 	// log = l
+// }
 
 func logErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if l, ok := log.(*glog.Logger); ok {
-		l.Output(2, err.Error())
-	} else {
-		//log.Println(err)
-	}
+
+	// if l, ok := log.(*glog.Logger); ok {
+	// 	l.Output(2, err.Error())
+	// } else {
+	// 	//log.Println(err)
+	// }
 	return err
 }
 

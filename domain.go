@@ -33,7 +33,7 @@ func extractActions(s string) (string, error) {
 	// Is this a bug? Intentional? Should be considered as part of the action?
 	// pd.damouse/
 
-	// i += 1
+	i += 1
 	return s[i:], nil
 }
 
