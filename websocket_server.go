@@ -2,6 +2,7 @@ package rabric
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -81,7 +82,7 @@ func newWebsocketServer(r Router) *WebsocketServer {
 
 // RegisterProtocol registers a serializer that should be used for a given protocol string and payload type.
 func (s *WebsocketServer) RegisterProtocol(proto string, payloadType int, serializer Serializer) error {
-	//log.Println("RegisterProtocol:", proto)
+	log.Println("RegisterProtocol:", proto)
 
 	if payloadType != websocket.TextMessage && payloadType != websocket.BinaryMessage {
 		return invalidPayload(payloadType)
@@ -109,7 +110,7 @@ func (s *WebsocketServer) GetLocalClient(realm string, details map[string]interf
 
 // ServeHTTP handles a new HTTP connection.
 func (s *WebsocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//log.Println("WebsocketServer.ServeHTTP", r.Method, r.RequestURI)
+	log.Println("WebsocketServer.ServeHTTP", r.Method, r.RequestURI)
 	// TODO: subprotocol?
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {

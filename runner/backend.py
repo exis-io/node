@@ -24,6 +24,11 @@ def kill():
     reactor.stop()
 
 
+def hasPermission():
+    print 'Query for a permission'
+    return True
+
+
 class Component(ApplicationSession):
 
     """
@@ -38,6 +43,7 @@ class Component(ApplicationSession):
         # yield self.publish('pd/hello')
 
         yield self.register(callAdd, 'pd.damouse/add')
+        yield self.register(hasPermission, 'pd.bouncer/checkPerm')
         yield self.register(kill, 'pd.damouse/kill')
 
         print 'Publishing to pd.pub'

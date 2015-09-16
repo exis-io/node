@@ -37,6 +37,7 @@ type Client struct {
 	events       map[ID]*eventDesc
 	procedures   map[ID]*procedureDesc
 	requestCount uint
+	pdid         URI
 }
 
 type procedureDesc struct {

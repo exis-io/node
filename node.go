@@ -51,6 +51,7 @@ func NewNode() Router {
 	// }
 
 	node.agent = node.localClient("pd")
+	// node.agent.pdid = URI("pd")
 
 	// Subscribe to meta-level events here
 	// TODO: create new object to handle this, no inline
@@ -78,6 +79,8 @@ func (n *node) localClient(s string) *Client {
 	if _, err := client.JoinRealm(s, nil); err != nil {
 		out.Error("Error when creating new client: ", err)
 	}
+
+	client.pdid = URI(s)
 
 	return client
 }
@@ -263,7 +266,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
 
-	// Make errors nice and pretty
+	// Make errors nice and pretty. These are riffle error messages, not node errors
 	m := *msg
 	if m.MessageType() == ERROR {
 		out.Warning("[%s] %s: %+v", *sess, m.MessageType(), *msg)
@@ -271,10 +274,11 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		out.Debug("[%s] %s: %+v", *sess, m.MessageType(), *msg)
 	}
 
+	// Extract the target domain from the message
 	if uri, ok := destination(msg); ok == nil {
 		// Ensure the construction of the message is valid, extract the endpoint, domain, and action
 		// domain, action, err := breakdownEndpoint(string(uri))
-		_, action, err := breakdownEndpoint(string(uri))
+		_, _, err := breakdownEndpoint(string(uri))
 
 		// Return a WAMP error to the user indicating a poorly constructed endpoint
 		if err != nil {
@@ -296,39 +300,29 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
 		if !n.Permitted(msg, sess) {
-			// Check cache for previously allowed downward permission
-			// TODO
-
-			// Check with bouncer on permissions check
-			// exists := n.realm.hasSubscription("pd/pong")
-			exists := n.realm.hasRegistration("pd/pong")
-			out.Debug("Registration for bouncer permissions exist: %s ", exists)
-
-			// Action is not permitted
-			out.Error("Operation not permitted! TODO: return an error here!")
 			return
 		}
 
 		// Testing
-		if action == "/ping" {
-			// out.Critical("Trying session lookup...")
+		// if action == "/ping" {
+		// 	// out.Critical("Trying session lookup...")
 
-			// Try and check if the given endpoint is registered.
+		// 	// Try and check if the given endpoint is registered.
 
-			// For now, dump the realm
-			s := n.realm.dump()
-			out.Critical(s)
+		// 	// For now, dump the realm
+		// 	s := n.realm.dump()
+		// 	out.Critical(s)
 
-			exists := n.realm.hasSubscription("pd/pong")
-			out.Critical("Subscription for pd/ping exists: ", exists)
+		// 	exists := n.realm.hasRegistration("pd.bouncer/checkPerm")
+		// 	out.Critical("Subscription for pd/ping exists: ", exists)
 
-			if exists {
-				out.Critical("Sending blind pub on pd/pong")
+		// 	if exists {
+		// 		out.Critical("Sending blind pub on pd/pong")
 
-				ret := n.agent.Publish("pd/pong", nil, nil)
-				out.Critical("Result of blind pub: %s", ret)
-			}
-		}
+		// 		ret := n.agent.Publish("pd/pong", nil, nil)
+		// 		out.Critical("Result of blind pub: %s", ret)
+		// 	}
+		// }
 
 		// Delivery (deferred)
 		// route = n.Route(msg)
@@ -345,10 +339,30 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 // Return true or false based on the message and the session which sent the messate
 func (n *node) Permitted(msg *Message, sess *Session) bool {
+	// The node's agent is always permitted to perform any action
+	if sess.pdid == n.agent.pdid {
+		out.Critical("Session agent performing action. Default allow.")
+		return true
+	}
+
 	// Is downward action? allow
 	// Check permissions cache: if found, allow
 	// Check with bouncer
+
+	// Check with bouncer on permissions check
+	exists := n.realm.hasRegistration("pd.bouncer/checkPerm")
+
+	if exists {
+		ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
+		out.Critical("Error: %s", err)
+		out.Critical("Permission exists, bouncer called and returnd: %s", ret)
+	}
+
 	return true
+
+	// Action is not permitted
+	out.Error("Operation not permitted! TODO: return an error here!")
+	return false
 }
 
 // returns the pdid of the next hop on the path for the given message
