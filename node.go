@@ -36,31 +36,12 @@ func NewNode() Router {
 	realm := Realm{URI: "pd"}
 	realm.init()
 
-	// node.realms["pd"] = realm
-
-	// Experimental single realm testing--- since we're handling the
-	// pubs and subs to begin with
+	// Single realm handles all pubs and subs
 	node.realm = realm
 
-	// peer, ok := node.GetLocalPeer("pd", nil)
-
-	// if peer, ok := node.GetLocalPeer("pd", nil); ok != nil {
-	//     //log.Println("Unable to create local session: ", ok)
-	// } else {
-	//     node.agent = peer
-	// }
-
 	node.agent = node.localClient("pd")
-	// node.agent.pdid = URI("pd")
 
 	// Subscribe to meta-level events here
-	// TODO: create new object to handle this, no inline
-	// h := func(args []interface{}, kwargs map[string]interface{}) {
-	// 	out.Warning("Got a pub on the local session!")
-	// }
-
-	// node.agent.Subscribe("pd/hello", node.cb)
-
 	return node
 }
 
@@ -277,7 +258,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// Extract the target domain from the message
 	if uri, ok := destination(msg); ok == nil {
 		// Ensure the construction of the message is valid, extract the endpoint, domain, and action
-		// domain, action, err := breakdownEndpoint(string(uri))
 		_, _, err := breakdownEndpoint(string(uri))
 
 		// Return a WAMP error to the user indicating a poorly constructed endpoint
@@ -292,42 +272,13 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			}
 
 			sess.Peer.Send(err)
-
 			return
 		}
-
-		// out.Debug("Extracted: %s %s \n", domain, action)
 
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
 		if !n.Permitted(msg, sess) {
 			return
 		}
-
-		// Testing
-		// if action == "/ping" {
-		// 	// out.Critical("Trying session lookup...")
-
-		// 	// Try and check if the given endpoint is registered.
-
-		// 	// For now, dump the realm
-		// 	s := n.realm.dump()
-		// 	out.Critical(s)
-
-		// 	exists := n.realm.hasRegistration("pd.bouncer/checkPerm")
-		// 	out.Critical("Subscription for pd/ping exists: ", exists)
-
-		// 	if exists {
-		// 		out.Critical("Sending blind pub on pd/pong")
-
-		// 		ret := n.agent.Publish("pd/pong", nil, nil)
-		// 		out.Critical("Result of blind pub: %s", ret)
-		// 	}
-		// }
-
-		// Delivery (deferred)
-		// route = n.Route(msg)
-
-		// n.CoreReady()
 
 	} else {
 		out.Debug("Unable to determine destination from message: %+v", *msg)
@@ -339,11 +290,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 // Return true or false based on the message and the session which sent the message
 func (n *node) Permitted(msg *Message, sess *Session) bool {
-	// return true
-
-	// Special case: the bouncer is permitted to do this
+	// TODO: allow all core appliances to perform whatever they want
 	if sess.pdid == "pd.bouncer" {
-		// out.Critical("Core appliance bouncer permitted access")
 		return true
 	}
 
@@ -358,23 +306,26 @@ func (n *node) Permitted(msg *Message, sess *Session) bool {
 	// Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
-	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
-		ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
+	// if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
+	// 	ret, err := n.agent.Call("pd.bouncer/checkPerm", nil, nil)
 
-		if err != nil {
-			out.Critical("Error, returning true: %s", err)
-			return true
-		}
+	// 	if err != nil {
+	// 		out.Critical("Error, returning true: %s", err)
+	// 		return true
+	// 	}
 
-		if permitted, ok := ret.Arguments[0].(bool); ok {
-			// out.Debug("Bouncer returning %s", permitted)
-			// TODO: save a permitted action in some flavor of cache
-			return permitted
-		} else {
-			out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
-			return true
-		}
-	}
+	// 	if permitted, ok := ret.Arguments[0].(bool); ok {
+	// 		// out.Debug("Bouncer returning %s", permitted)
+	// 		// TODO: save a permitted action in some flavor of cache
+	// 		return permitted
+	// 	} else {
+	// 		out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
+	// 		return true
+	// 	}
+	// } else {
+	// 	out.Critical("No bouncer registered. Action not permitted.")
+
+	// }
 
 	// Action is not permitted
 	out.Error("Operation not permitted!")
