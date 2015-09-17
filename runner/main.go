@@ -13,7 +13,7 @@ func main() {
 	rabric.Log()
 
 	// Pass certificate here
-	s := rabric.NewBasicWebsocketServer("pd.routers.aardvark")
+	s := rabric.CreateNode("pd.routers.aardvark")
 
 	server := &http.Server{
 		Handler: s,

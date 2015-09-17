@@ -44,20 +44,8 @@ type WebsocketServer struct {
 }
 
 func CreateNode(pdid string) *WebsocketServer {
-	s, _ := NewWebsocketServer(pdid)
-	return s
-}
-
-// Creates a new WebsocketServer from a map of realms
-func NewWebsocketServer(pdid string) (*WebsocketServer, error) {
 	r := NewNode(pdid)
 	s := newWebsocketServer(r)
-	return s, nil
-}
-
-// Creates a new WebsocketServer with a single basic realm
-func NewBasicWebsocketServer(pdid string) *WebsocketServer {
-	s, _ := NewWebsocketServer(pdid)
 	return s
 }
 
