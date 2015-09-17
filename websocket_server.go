@@ -44,25 +44,17 @@ type WebsocketServer struct {
 }
 
 // Creates a new WebsocketServer from a map of realms
-func NewWebsocketServer(realms map[string]Realm) (*WebsocketServer, error) {
+func NewWebsocketServer(pdid string) (*WebsocketServer, error) {
 	//out.Debug("NewWebsocketServer")
 
-	r := NewNode()
-
-	for uri, realm := range realms {
-		if err := r.RegisterRealm(URI(uri), realm); err != nil {
-			return nil, err
-		}
-	}
-
+	r := NewNode(pdid)
 	s := newWebsocketServer(r)
 	return s, nil
 }
 
 // Creates a new WebsocketServer with a single basic realm
-func NewBasicWebsocketServer(uri string) *WebsocketServer {
-	// //log.Println("New Basic Node")
-	s, _ := NewWebsocketServer(map[string]Realm{uri: {}})
+func NewBasicWebsocketServer(pdid string) *WebsocketServer {
+	s, _ := NewWebsocketServer(pdid)
 	return s
 }
 

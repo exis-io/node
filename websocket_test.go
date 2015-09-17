@@ -9,7 +9,7 @@ import (
 )
 
 func newTestWebsocketServer(t *testing.T) (int, Node, io.Closer) {
-	r := NewNode()
+	r := NewNode("pd.test")
 	r.RegisterRealm(testRealm, Realm{})
 	s := newWebsocketServer(r)
 	server := &http.Server{

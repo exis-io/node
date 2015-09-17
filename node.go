@@ -26,7 +26,7 @@ type node struct {
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
-func NewNode() Node {
+func NewNode(pdid string) Node {
 	node := &node{}
 
 	// Provisioning: this Node needs a name
@@ -36,12 +36,12 @@ func NewNode() Node {
 	// Here we assume *one* Node as root and a default pd namespace
 	// Node should identify itself based on its root certificate, for now
 	// just set a constant name
-	realm := Realm{URI: "pd"}
+	realm := Realm{URI: URI(pdid)}
 	realm.init()
 
 	// Single realm handles all pubs and subs
 	node.realm = realm
-	node.agent = node.localClient("pd")
+	node.agent = node.localClient(pdid)
 
 	// Subscribe to meta-level events here
 	return node
