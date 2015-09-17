@@ -29,7 +29,6 @@ func NewNode(pdid string) Node {
 		sessions: make(map[string]Session, 0),
 	}
 
-	// realm := Realm{URI: URI(pdid)}
 	realm := Realm{}
 	realm.init()
 
@@ -245,13 +244,16 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	}
 
 	// Is downward action? allow
-	return true
+	if val := subdomain(string(sess.pdid), string(endpoint)); val {
+		return val
+	}
 
 	// Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
 	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
 		args := []interface{}{string(sess.pdid), string(endpoint)}
+
 		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
 
 		if err != nil {
