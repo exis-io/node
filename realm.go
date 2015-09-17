@@ -1,7 +1,6 @@
 package rabric
 
 import (
-	// "encoding/json"
 	"fmt"
 	"time"
 )
@@ -10,22 +9,15 @@ const (
 	defaultAuthTimeout = 2 * time.Minute
 )
 
-// A Realm is a WAMP routing and administrative domain.
-//
-// Clients that have connected to a WAMP Node are joined to a realm and all
-// message delivery is handled by the realm.
 type Realm struct {
 	_   string
 	URI URI
 	Broker
 	Dealer
-	Authorizer
-	Interceptor
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
-	// DefaultAuth      func(details map[string]interface{}) (map[string]interface{}, error)
-	AuthTimeout time.Duration
-	clients     map[string]Session
+	AuthTimeout      time.Duration
+	clients          map[string]Session
 }
 
 func (r *Realm) init() {
@@ -36,130 +28,9 @@ func (r *Realm) init() {
 	if r.Dealer == nil {
 		r.Dealer = NewDefaultDealer()
 	}
-	if r.Authorizer == nil {
-		r.Authorizer = NewDefaultAuthorizer()
-	}
-	if r.Interceptor == nil {
-		r.Interceptor = NewDefaultInterceptor()
-	}
 	if r.AuthTimeout == 0 {
 		r.AuthTimeout = defaultAuthTimeout
 	}
-}
-
-// I thought external functions have to be capitalized, and this is called externally.
-// Does that not apply to methods?
-func (r *Realm) handleSession(sess Session, details map[string]interface{}) {
-	c := sess.Receive()
-	// TODO: what happens if the realm is closed?
-
-	for {
-		// var msg Message
-		// var open bool
-
-		// select {
-		// case msg, open = <-c:
-		// 	if !open {
-		// 		//log.Println("lost session:", sess)
-		// 		return
-		// 	}
-
-		// case reason := <-sess.kill:
-		// 	logErr(sess.Send(&Goodbye{Reason: reason, Details: make(map[string]interface{})}))
-		// 	//log.Printf("kill session %s: %v", sess, reason)
-		// 	// TODO: wait for client Goodbye?
-		// 	return
-		// }
-
-		msg, ok := getMessageSession(sess, c)
-
-		// The connection was closed for some reason
-		if !ok {
-			//log.Println("Session closing with status: ", ok)
-			return
-		}
-
-		//log.Printf("[%s] %s: %+v", sess, msg.MessageType(), msg)
-
-		if isAuthz, err := r.Authorizer.Authorize(sess.Id, msg, details); !isAuthz {
-			errMsg := &Error{Type: msg.MessageType()}
-			if err != nil {
-				errMsg.Error = ErrAuthorizationFailed
-				//log.Printf("[%s] authorization failed: %v", sess, err)
-			} else {
-				errMsg.Error = ErrNotAuthorized
-				//log.Printf("[%s] %s UNAUTHORIZED", sess, msg.MessageType())
-			}
-			logErr(sess.Send(errMsg))
-			continue
-		}
-
-		// r.Interceptor.Intercept(sess.Id, &msg, details)
-
-		switch msg := msg.(type) {
-		case *Goodbye:
-			logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
-			//log.Printf("[%s] leaving: %v", sess, msg.Reason)
-			return
-
-		// Broker messages
-		case *Publish:
-			r.Broker.Publish(sess.Peer, msg)
-		case *Subscribe:
-			r.Broker.Subscribe(sess.Peer, msg)
-		case *Unsubscribe:
-			r.Broker.Unsubscribe(sess.Peer, msg)
-
-		// Dealer messages
-		case *Register:
-			r.Dealer.Register(sess.Peer, msg)
-		case *Unregister:
-			r.Dealer.Unregister(sess.Peer, msg)
-		case *Call:
-			r.Dealer.Call(sess.Peer, msg)
-		case *Yield:
-			r.Dealer.Yield(sess.Peer, msg)
-
-		// Error messages
-		case *Error:
-			if msg.Type == INVOCATION {
-				// the only type of ERROR message the Node should receive
-				r.Dealer.Error(sess.Peer, msg)
-			} else {
-				//log.Printf("invalid ERROR message received: %v", msg)
-			}
-
-		default:
-			//log.Println("Unhandled message:", msg.MessageType())
-		}
-	}
-}
-
-// receives incoming messages from sessions
-// TEMP
-func getMessageSession(sess Session, c <-chan Message) (msg Message, ok bool) {
-	// c := sess.Receive()
-	// TODO: what happens if the realm is closed?
-
-	// var msg Message
-	var open bool
-
-	select {
-	case msg, open = <-c:
-		if !open {
-			//log.Println("lost session:", sess)
-			return nil, false
-		}
-
-	case reason := <-sess.kill:
-		logErr(sess.Send(&Goodbye{Reason: reason, Details: make(map[string]interface{})}))
-		//log.Printf("kill session %s: %v", sess, reason)
-
-		// TODO: wait for client Goodbye?
-		return nil, false
-	}
-
-	return msg, true
 }
 
 func (r Realm) Close() {
@@ -277,26 +148,6 @@ func addAuthMethod(details map[string]interface{}, method string) map[string]int
 
 func (r *Realm) handleMessage(msg Message, sess Session) {
 
-	// //log.Printf("[%s] %s: %+v", sess, msg.MessageType(), msg)
-
-	// if isAuthz, err := r.Authorizer.Authorize(sess.Id, msg, details); !isAuthz {
-	// 	errMsg := &Error{Type: msg.MessageType()}
-	// 	if err != nil {
-	// 		errMsg.Error = ErrAuthorizationFailed
-	// 		//log.Printf("[%s] authorization failed: %v", sess, err)
-	// 	} else {
-	// 		errMsg.Error = ErrNotAuthorized
-	// 		//log.Printf("[%s] %s UNAUTHORIZED", sess, msg.MessageType())
-	// 	}
-
-	// 	logErr(sess.Send(errMsg))
-	// 	// continue
-	// 	return
-	// }
-
-	// No idea what this was meant to do
-	// r.Interceptor.Intercept(sess.Id, &msg, details)
-
 	switch msg := msg.(type) {
 	case *Goodbye:
 		logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
@@ -327,13 +178,12 @@ func (r *Realm) handleMessage(msg Message, sess Session) {
 			// the only type of ERROR message the Node should receive
 			r.Dealer.Error(sess.Peer, msg)
 		} else {
-			//log.Printf("invalid ERROR message received: %v", msg)
+			out.Critical("invalid ERROR message received: %v", msg)
 		}
 
 	default:
-		//log.Println("Unhandled message:", msg.MessageType())
+		out.Critical("Unhandled message:", msg.MessageType())
 	}
-
 }
 
 // Dump the contents of the realm

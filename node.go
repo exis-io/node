@@ -299,7 +299,7 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	}
 
 	// Is downward action? allow
-	return true
+	// return true
 
 	// Check permissions cache: if found, allow
 
@@ -357,7 +357,8 @@ func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer,
 		details = make(map[string]interface{})
 	}
 
-	go r.realm.handleSession(sess, details)
+	// go r.realm.handleSession(sess, details)
+	go Listen(r, sess)
 	return peerB, nil
 }
 
