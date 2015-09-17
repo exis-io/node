@@ -346,10 +346,6 @@ func (n *node) CoreReady() bool {
 	return true
 }
 
-////////////////////////////////////////
-// Old code, not sure if still useful
-////////////////////////////////////////
-
 // GetLocalPeer returns an internal peer connected to the specified realm.
 func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer, error) {
 	peerA, peerB := localPipe()
@@ -369,4 +365,39 @@ func (r *node) getTestPeer() Peer {
 	peerA, peerB := localPipe()
 	go r.Accept(peerA)
 	return peerB
+}
+
+var defaultWelcomeDetails = map[string]interface{}{
+	"roles": map[string]struct{}{
+		"broker": {},
+		"dealer": {},
+	},
+}
+
+////////////////////////////////////////
+// Misc and old
+////////////////////////////////////////
+
+type RealmExistsError string
+
+func (e RealmExistsError) Error() string {
+	return "realm exists: " + string(e)
+}
+
+type NoSuchRealmError string
+
+func (e NoSuchRealmError) Error() string {
+	return "no such realm: " + string(e)
+}
+
+type AuthenticationError string
+
+func (e AuthenticationError) Error() string {
+	return "authentication error: " + string(e)
+}
+
+type InvalidURIError string
+
+func (e InvalidURIError) Error() string {
+	return "invalid URI: " + string(e)
 }
