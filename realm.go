@@ -16,11 +16,9 @@ type Realm struct {
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
 	AuthTimeout      time.Duration
-	clients          map[string]Session
 }
 
 func (r *Realm) init() {
-	r.clients = make(map[string]Session)
 	if r.Broker == nil {
 		r.Broker = NewDefaultBroker()
 	}
@@ -29,12 +27,6 @@ func (r *Realm) init() {
 	}
 	if r.AuthTimeout == 0 {
 		r.AuthTimeout = defaultAuthTimeout
-	}
-}
-
-func (r Realm) Close() {
-	for _, client := range r.clients {
-		client.kill <- ErrSystemShutdown
 	}
 }
 

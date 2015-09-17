@@ -1,5 +1,7 @@
 package node
 
+// Consider for data structures: http://arslan.io/thread-safe-set-data-structure-in-go
+
 import (
 	"fmt"
 	"sync"
@@ -18,11 +20,14 @@ type node struct {
 	closeLock sync.Mutex
 	realm     Realm
 	agent     *Client
+	sessions  map[string]Session
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(pdid string) Node {
-	node := &node{}
+	node := &node{
+		sessions: make(map[string]Session, 0),
+	}
 
 	// realm := Realm{URI: URI(pdid)}
 	realm := Realm{}
@@ -36,17 +41,21 @@ func NewNode(pdid string) Node {
 	return node
 }
 
-func (r *node) Close() error {
-	r.closeLock.Lock()
+func (node *node) Close() error {
+	node.closeLock.Lock()
 
-	if r.closing {
-		r.closeLock.Unlock()
+	if node.closing {
+		node.closeLock.Unlock()
 		return fmt.Errorf("already closed")
 	}
 
-	r.closing = true
-	r.closeLock.Unlock()
-	r.realm.Close()
+	node.closing = true
+	node.closeLock.Unlock()
+
+	// Tell all sessions wer're going down
+	for _, s := range node.sessions {
+		s.kill <- ErrSystemShutdown
+	}
 
 	return nil
 }
@@ -160,8 +169,9 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	out.Notice("Session open: [%s]", string(hello.Realm))
-
 	sess = Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
+	n.sessions[string(hello.Realm)] = sess
+
 	return sess, nil
 }
 
@@ -173,6 +183,8 @@ func (n *node) SessionClose(sess Session) {
 	// Did these really not exist before? Doesn't seem likely, but can't find them
 	n.realm.Dealer.lostSession(sess)
 	n.realm.Broker.lostSession(sess)
+
+	delete(n.sessions, string(sess.pdid))
 
 	// Meta level events
 	// for _, callback := range n.sessionCloseCallbacks {
