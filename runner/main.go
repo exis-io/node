@@ -7,21 +7,18 @@ import (
 	"github.com/ParadropLabs/node"
 )
 
-var client *rabric.Client
+// var client *rabric.Client
 
 func main() {
 	rabric.Log()
 
-	//log.Println("Starting Node.")
-	// rabric.Debug()
-
-	s := rabric.NewBasicWebsocketServer("pd.damouse")
+	// Pass certificate here
+	s := rabric.NewBasicWebsocketServer("pd.routers.aardvark")
 
 	server := &http.Server{
 		Handler: s,
 		Addr:    ":8000",
 	}
 
-	//log.Println("rabric server starting on port 8000")
 	log.Fatal(server.ListenAndServe())
 }

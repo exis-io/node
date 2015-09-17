@@ -11,18 +11,13 @@ type Node interface {
 	Close() error
 	RegisterRealm(URI, Realm) error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
-	AddSessionOpenCallback(func(uint, string))
-	AddSessionCloseCallback(func(uint, string))
-	cb([]interface{}, map[string]interface{})
 }
 
 type node struct {
-	closing               bool
-	closeLock             sync.Mutex
-	sessionOpenCallbacks  []func(uint, string)
-	sessionCloseCallbacks []func(uint, string)
-	realm                 Realm
-	agent                 *Client
+	closing   bool
+	closeLock sync.Mutex
+	realm     Realm
+	agent     *Client
 	// sessionPdid           map[string]string
 	// nodes                 map[string]Session
 	// forwarding            map[string]Session
@@ -32,10 +27,7 @@ type node struct {
 
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode() Node {
-	node := &node{
-		sessionOpenCallbacks:  []func(uint, string){},
-		sessionCloseCallbacks: []func(uint, string){},
-	}
+	node := &node{}
 
 	// Provisioning: this Node needs a name
 	// Unhandled case: what to do with Nodes that start with nothing?
@@ -74,14 +66,6 @@ func (n *node) localClient(s string) *Client {
 	client.pdid = URI(s)
 
 	return client
-}
-
-func (r *node) AddSessionOpenCallback(fn func(uint, string)) {
-	r.sessionOpenCallbacks = append(r.sessionOpenCallbacks, fn)
-}
-
-func (r *node) AddSessionCloseCallback(fn func(uint, string)) {
-	r.sessionCloseCallbacks = append(r.sessionCloseCallbacks, fn)
 }
 
 func (r *node) Close() error {
@@ -352,12 +336,10 @@ func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer,
 	sess := Session{Peer: peerA, Id: NewID(), kill: make(chan URI, 1)}
 	out.Notice("Established internal session:", sess.Id)
 
-	// TODO: session open/close callbacks?
 	if details == nil {
 		details = make(map[string]interface{})
 	}
 
-	// go r.realm.handleSession(sess, details)
 	go Listen(r, sess)
 	return peerB, nil
 }
