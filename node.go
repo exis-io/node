@@ -8,8 +8,8 @@ import (
 
 type Node interface {
 	Accept(Peer) error
+	Listen(Session)
 	Close() error
-	RegisterRealm(URI, Realm) error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
 }
 
@@ -29,14 +29,8 @@ type node struct {
 func NewNode(pdid string) Node {
 	node := &node{}
 
-	// Provisioning: this Node needs a name
-	// Unhandled case: what to do with Nodes that start with nothing?
-	// They still have to create a peer (self) and ask for an identity
-
-	// Here we assume *one* Node as root and a default pd namespace
-	// Node should identify itself based on its root certificate, for now
-	// just set a constant name
-	realm := Realm{URI: URI(pdid)}
+	// realm := Realm{URI: URI(pdid)}
+	realm := Realm{}
 	realm.init()
 
 	// Single realm handles all pubs and subs
@@ -45,27 +39,6 @@ func NewNode(pdid string) Node {
 
 	// Subscribe to meta-level events here
 	return node
-}
-
-// Testing method to ensure that structs can be receivers for Riffle traffic
-func (n *node) cb(args []interface{}, kwargs map[string]interface{}) {
-	out.Notice("Pub on local session!")
-}
-
-func (n *node) localClient(s string) *Client {
-	p := n.getTestPeer()
-
-	// p, _ := n.GetLocalPeer(URI(s), nil)
-
-	client := NewClient(p)
-	client.ReceiveTimeout = 1000 * time.Millisecond
-	if _, err := client.JoinRealm(s, nil); err != nil {
-		out.Error("Error when creating new client: ", err)
-	}
-
-	client.pdid = URI(s)
-
-	return client
 }
 
 func (r *node) Close() error {
@@ -83,13 +56,8 @@ func (r *node) Close() error {
 	return nil
 }
 
-// Shouldn't be called anymore
-func (r *node) RegisterRealm(uri URI, realm Realm) error {
-	return nil
-}
-
-func (r *node) Accept(client Peer) error {
-	sess, ok := r.Handshake(client)
+func (node *node) Accept(client Peer) error {
+	sess, ok := node.Handshake(client)
 
 	if ok != nil {
 		return ok
@@ -97,19 +65,14 @@ func (r *node) Accept(client Peer) error {
 
 	// Start listening on the session
 	// This will eventually move to the session
-	go Listen(r, sess)
+	go node.Listen(sess)
 
 	return nil
 }
 
-////////////////////////////////////////
-// New Content
-////////////////////////////////////////
-
 // Spin on a session, wait for messages to arrive. Method does not return
 // until session closes
-// NOTE: realm and details are OLD CODE and should not be construed as permanent fixtures
-func Listen(node *node, sess Session) {
+func (node *node) Listen(sess Session) {
 	c := sess.Receive()
 
 	for {
@@ -340,7 +303,7 @@ func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer,
 		details = make(map[string]interface{})
 	}
 
-	go Listen(r, sess)
+	go r.Listen(sess)
 	return peerB, nil
 }
 
@@ -383,4 +346,18 @@ type InvalidURIError string
 
 func (e InvalidURIError) Error() string {
 	return "invalid URI: " + string(e)
+}
+
+func (n *node) localClient(s string) *Client {
+	p := n.getTestPeer()
+
+	client := NewClient(p)
+	client.ReceiveTimeout = 1000 * time.Millisecond
+	if _, err := client.JoinRealm(s, nil); err != nil {
+		out.Error("Error when creating new client: ", err)
+	}
+
+	client.pdid = URI(s)
+
+	return client
 }

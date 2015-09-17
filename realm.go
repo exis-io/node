@@ -10,8 +10,7 @@ const (
 )
 
 type Realm struct {
-	_   string
-	URI URI
+	_ string
 	Broker
 	Dealer
 	CRAuthenticators map[string]CRAuthenticator
