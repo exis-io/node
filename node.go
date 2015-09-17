@@ -287,12 +287,6 @@ func (n *node) Route(msg *Message) string {
 	return ""
 }
 
-// Returns true if core appliances connected
-func (n *node) CoreReady() bool {
-	out.Warning("Core status: ", n.realm)
-	return true
-}
-
 // GetLocalPeer returns an internal peer connected to the specified realm.
 func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer, error) {
 	peerA, peerB := localPipe()
