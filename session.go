@@ -55,6 +55,10 @@ func (s *localPeer) Close() error {
 	return nil
 }
 
+////////////////////////////////////////
+// Contents of old 'peer.go' file
+////////////////////////////////////////
+
 // A Sender can send a message to its peer.
 //
 // For clients, this sends a message to the Node, and for Nodes,
