@@ -12,7 +12,7 @@ const (
 
 // A Realm is a WAMP routing and administrative domain.
 //
-// Clients that have connected to a WAMP router are joined to a realm and all
+// Clients that have connected to a WAMP Node are joined to a realm and all
 // message delivery is handled by the realm.
 type Realm struct {
 	_   string
@@ -123,7 +123,7 @@ func (r *Realm) handleSession(sess Session, details map[string]interface{}) {
 		// Error messages
 		case *Error:
 			if msg.Type == INVOCATION {
-				// the only type of ERROR message the router should receive
+				// the only type of ERROR message the Node should receive
 				r.Dealer.Error(sess.Peer, msg)
 			} else {
 				//log.Printf("invalid ERROR message received: %v", msg)
@@ -324,7 +324,7 @@ func (r *Realm) handleMessage(msg Message, sess Session) {
 	// Error messages
 	case *Error:
 		if msg.Type == INVOCATION {
-			// the only type of ERROR message the router should receive
+			// the only type of ERROR message the Node should receive
 			r.Dealer.Error(sess.Peer, msg)
 		} else {
 			//log.Printf("invalid ERROR message received: %v", msg)

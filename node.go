@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+type Node interface {
+	Accept(Peer) error
+	Close() error
+	RegisterRealm(URI, Realm) error
+	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
+	AddSessionOpenCallback(func(uint, string))
+	AddSessionCloseCallback(func(uint, string))
+	cb([]interface{}, map[string]interface{})
+}
+
 type node struct {
 	closing               bool
 	closeLock             sync.Mutex
@@ -20,26 +30,25 @@ type node struct {
 	// agent                 *Client
 }
 
-// NewDefaultRouter creates a very basic WAMP router.
-func NewNode() Router {
+// NewDefaultNode creates a very basic WAMP Node.
+func NewNode() Node {
 	node := &node{
 		sessionOpenCallbacks:  []func(uint, string){},
 		sessionCloseCallbacks: []func(uint, string){},
 	}
 
-	// Provisioning: this router needs a name
-	// Unhandled case: what to do with routers that start with nothing?
+	// Provisioning: this Node needs a name
+	// Unhandled case: what to do with Nodes that start with nothing?
 	// They still have to create a peer (self) and ask for an identity
 
-	// Here we assume *one* router as root and a default pd namespace
-	// Router should identify itself based on its root certificate, for now
+	// Here we assume *one* Node as root and a default pd namespace
+	// Node should identify itself based on its root certificate, for now
 	// just set a constant name
 	realm := Realm{URI: "pd"}
 	realm.init()
 
 	// Single realm handles all pubs and subs
 	node.realm = realm
-
 	node.agent = node.localClient("pd")
 
 	// Subscribe to meta-level events here
@@ -157,7 +166,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	if n.closing {
 		logErr(client.Send(&Abort{Reason: ErrSystemShutdown}))
 		logErr(client.Close())
-		return sess, fmt.Errorf("Router is closing, no new connections are allowed")
+		return sess, fmt.Errorf("Node is closing, no new connections are allowed")
 	}
 
 	msg, err := GetMessageTimeout(client, 5*time.Second)

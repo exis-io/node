@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func newTestWebsocketServer(t *testing.T) (int, Router, io.Closer) {
-	r := NewDefaultRouter()
+func newTestWebsocketServer(t *testing.T) (int, Node, io.Closer) {
+	r := NewNode()
 	r.RegisterRealm(testRealm, Realm{})
 	s := newWebsocketServer(r)
 	server := &http.Server{

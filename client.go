@@ -24,14 +24,14 @@ var (
 	}
 )
 
-// A Client routes messages to/from a WAMP router.
+// A Client routes messages to/from a WAMP Node.
 type Client struct {
 	Peer
-	// ReceiveTimeout is the amount of time that the client will block waiting for a response from the router.
+	// ReceiveTimeout is the amount of time that the client will block waiting for a response from the Node.
 	ReceiveTimeout time.Duration
 	// Auth is a map of WAMP authmethods to functions that will handle each auth type
 	Auth map[string]AuthFunc
-	// ReceiveDone is notified when the client's connection to the router is lost.
+	// ReceiveDone is notified when the client's connection to the Node is lost.
 	ReceiveDone  chan bool
 	listeners    map[ID]chan Message
 	events       map[ID]*eventDesc
@@ -395,7 +395,7 @@ type MethodHandler func(
 	args []interface{}, kwargs map[string]interface{}, details map[string]interface{},
 ) (result *CallResult)
 
-// Register registers a MethodHandler procedure with the router.
+// Register registers a MethodHandler procedure with the Node.
 func (c *Client) Register(procedure string, fn MethodHandler, options map[string]interface{}) error {
 	id := NewID()
 	c.registerListener(id)
@@ -426,7 +426,7 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 // BasicMethodHandler is an RPC endpoint that doesn't expect the `Details` map
 type BasicMethodHandler func(args []interface{}, kwargs map[string]interface{}) (result *CallResult)
 
-// BasicRegister registers a BasicMethodHandler procedure with the router
+// BasicRegister registers a BasicMethodHandler procedure with the Node
 func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 	wrap := func(args []interface{}, kwargs map[string]interface{},
 		details map[string]interface{}) (result *CallResult) {
@@ -435,7 +435,7 @@ func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 	return c.Register(procedure, wrap, make(map[string]interface{}))
 }
 
-// Unregister removes a procedure with the router
+// Unregister removes a procedure with the Node
 func (c *Client) Unregister(procedure string) error {
 	var (
 		procedureID ID

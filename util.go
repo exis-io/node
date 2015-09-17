@@ -30,9 +30,9 @@ const (
 
 	// A call failed, since the given argument types or values are not acceptable
 	// to the called procedure - in which case the Callee may throw this error. Or
-	// a Router performing payload validation checked the payload (args / kwargs)
+	// a Node performing payload validation checked the payload (args / kwargs)
 	// of a call, call result, call error or publish, and the payload did not
-	// conform - in which case the Router may throw this error.
+	// conform - in which case the Node may throw this error.
 	ErrInvalidArgument = URI("wamp.error.invalid_argument")
 
 	// --- Session Close ---
@@ -57,14 +57,14 @@ const (
 	// operation itself failed. E.g. a custom authorizer ran into an error.
 	ErrAuthorizationFailed = URI("wamp.error.authorization_failed")
 
-	// Peer wanted to join a non-existing realm (and the Router did not allow to
+	// Peer wanted to join a non-existing realm (and the Node did not allow to
 	// auto-create the realm)
 	ErrNoSuchRealm = URI("wamp.error.no_such_realm")
 
 	// A Peer was to be authenticated under a Role that does not (or no longer)
-	// exists on the Router. For example, the Peer was successfully authenticated,
+	// exists on the Node. For example, the Peer was successfully authenticated,
 	// but the Role configured does not exists - hence there is some
-	// misconfiguration in the Router.
+	// misconfiguration in the Node.
 	ErrNoSuchRole = URI("wamp.error.no_such_role")
 )
 
