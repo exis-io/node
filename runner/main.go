@@ -10,10 +10,10 @@ import (
 // var client *rabric.Client
 
 func main() {
-	rabric.Log()
+	node.Log()
 
 	// Pass certificate here
-	s := rabric.CreateNode("pd.routers.aardvark")
+	s := node.CreateNode("pd.routers.aardvark")
 
 	server := &http.Server{
 		Handler: s,
