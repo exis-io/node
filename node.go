@@ -241,7 +241,7 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	}
 
 	// Is downward action? allow
-	// return true
+	return true
 
 	// Check permissions cache: if found, allow
 
