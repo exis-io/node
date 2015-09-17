@@ -43,10 +43,13 @@ type WebsocketServer struct {
 	BinarySerializer Serializer
 }
 
+func CreateNode(pdid string) *WebsocketServer {
+	s, _ := NewWebsocketServer(pdid)
+	return s
+}
+
 // Creates a new WebsocketServer from a map of realms
 func NewWebsocketServer(pdid string) (*WebsocketServer, error) {
-	//out.Debug("NewWebsocketServer")
-
 	r := NewNode(pdid)
 	s := newWebsocketServer(r)
 	return s, nil
