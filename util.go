@@ -1,4 +1,4 @@
-package rabric
+package node
 
 import (
 	"math/rand"

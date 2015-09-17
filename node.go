@@ -1,4 +1,4 @@
-package rabric
+package node
 
 import (
 	"fmt"
@@ -18,11 +18,6 @@ type node struct {
 	closeLock sync.Mutex
 	realm     Realm
 	agent     *Client
-	// sessionPdid           map[string]string
-	// nodes                 map[string]Session
-	// forwarding            map[string]Session
-	// permissions           map[string]string
-	// agent                 *Client
 }
 
 // NewDefaultNode creates a very basic WAMP Node.

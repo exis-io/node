@@ -1,4 +1,4 @@
-package rabric
+package node
 
 // Message is a generic container for a WAMP message.
 type Message interface {

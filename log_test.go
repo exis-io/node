@@ -1,4 +1,4 @@
-package rabric
+package node
 
 import (
 	_ "github.com/smartystreets/goconvey/convey"

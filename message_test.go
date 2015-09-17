@@ -1,15 +1,16 @@
-package rabric
+package node
 
 import (
-    "testing"
-    . "github.com/smartystreets/goconvey/convey"
+	"testing"
+
+	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestTarget(t *testing.T) {
-    Convey("Destination is extracted for normal traffic", t, func() {
-        Convey("When message is Publish", func() {
-            // msg = 
-            So(validEndpoint("pd"), ShouldBeTrue)
-        })
-    })
+	Convey("Destination is extracted for normal traffic", t, func() {
+		Convey("When message is Publish", func() {
+			// msg =
+			So(validEndpoint("pd"), ShouldBeTrue)
+		})
+	})
 }

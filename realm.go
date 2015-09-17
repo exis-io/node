@@ -1,4 +1,4 @@
-package rabric
+package node
 
 import (
 	"fmt"
@@ -141,6 +141,7 @@ func addAuthMethod(details map[string]interface{}, method string) map[string]int
 	if details == nil {
 		details = make(map[string]interface{})
 	}
+
 	details["authmethod"] = method
 	return details
 }
