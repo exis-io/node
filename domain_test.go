@@ -85,3 +85,33 @@ func TestExtractBoth(t *testing.T) {
 		})
 	})
 }
+
+func TestDownwardAction(t *testing.T) {
+	Convey("Valid subdomains", t, func() {
+		Convey("Can be the same domain", func() {
+			So(subdomain("pd.damouse", "pd.damouse"), ShouldBeTrue)
+		})
+
+		Convey("Can have one domain", func() {
+			So(subdomain("pd.damouse", "pd.damouse.aardvark"), ShouldBeTrue)
+		})
+
+		Convey("Can have arbitrarily many subdomains", func() {
+			So(subdomain("pd.damouse", "pd.damouse.a.b.c"), ShouldBeTrue)
+		})
+	})
+
+	Convey("Invalid subdomains", t, func() {
+		Convey("Can start with different letters", func() {
+			So(subdomain("pd.xamouse", "pd.damouse"), ShouldBeFalse)
+		})
+
+		Convey("Can have intermediate domains", func() {
+			So(subdomain("pd.damouse", "pd.aardvark.damouse"), ShouldBeFalse)
+		})
+
+		Convey("Can have spaces at the start", func() {
+			So(subdomain(" pd.damouse", "pd.damouse.a.b.c"), ShouldBeFalse)
+		})
+	})
+}

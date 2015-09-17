@@ -143,7 +143,7 @@ func (r *Realm) handleMessage(msg Message, sess Session) {
 	switch msg := msg.(type) {
 	case *Goodbye:
 		logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
-		//log.Printf("[%s] leaving: %v", sess, msg.Reason)
+		// log.Printf("[%s] leaving: %v", sess, msg.Reason)
 		return
 
 	// Broker messages

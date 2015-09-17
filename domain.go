@@ -1,6 +1,7 @@
 package node
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -20,7 +21,8 @@ func validAction(s string) bool {
 	return true
 }
 
-// Extract action from endpoint, returning an error
+// Extract action from endpoint. Endpoint without a closing slash
+// indicating an action is considered an error.
 func extractActions(s string) (string, error) {
 	i := strings.Index(s, "/")
 
@@ -28,10 +30,6 @@ func extractActions(s string) (string, error) {
 	if i == -1 {
 		return "", InvalidURIError(s)
 	}
-
-	// not covered: closing slash
-	// Is this a bug? Intentional? Should be considered as part of the action?
-	// pd.damouse/
 
 	i += 1
 	return s[i:], nil
@@ -47,6 +45,15 @@ func extractDomain(s string) (string, error) {
 	}
 
 	return s[:i], nil
+}
+
+// Checks if the target domain is "down" from the given domain.
+// That is-- it is either a subdomain or the same domain.
+// Assumes the passed domains are well constructed.
+func subdomain(agent, target string) bool {
+	q := fmt.Sprintf("(^%s)", agent)
+	reg, _ := regexp.Compile(q)
+	return reg.MatchString(target)
 }
 
 // breaks down an endpoint into domain and action, or returns an error

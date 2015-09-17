@@ -57,6 +57,9 @@ func (node *node) Close() error {
 		s.kill <- ErrSystemShutdown
 	}
 
+	// Clear the map (might not be needed)
+	node.sessions = make(map[string]Session, 0)
+
 	return nil
 }
 
@@ -75,7 +78,6 @@ func (node *node) Accept(client Peer) error {
 }
 
 // Spin on a session, wait for messages to arrive. Method does not return
-// until session closes
 func (node *node) Listen(sess Session) {
 	c := sess.Receive()
 
@@ -104,10 +106,6 @@ func (node *node) Listen(sess Session) {
 		node.Handle(&msg, &sess)
 	}
 }
-
-////////////////////////////////////////
-// Very new code
-////////////////////////////////////////
 
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
@@ -180,16 +178,10 @@ func (n *node) SessionClose(sess Session) {
 	sess.Close()
 	out.Notice("Session close: [%s]", sess)
 
-	// Did these really not exist before? Doesn't seem likely, but can't find them
 	n.realm.Dealer.lostSession(sess)
 	n.realm.Broker.lostSession(sess)
 
 	delete(n.sessions, string(sess.pdid))
-
-	// Meta level events
-	// for _, callback := range n.sessionCloseCallbacks {
-	//     go callback(uint(sess.Id), string(hello.Realm))
-	// }
 }
 
 // Handle a new message
@@ -233,7 +225,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		}
 
 	} else {
-		out.Debug("Unable to determine destination from message: %+v", *msg)
+		// out.Debug("Unable to determine destination from message: %+v", *msg)
 		// n.realm.handleMessage(*msg, *sess)
 	}
 
@@ -253,15 +245,13 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	}
 
 	// Is downward action? allow
-	// return true
+	return true
 
 	// Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
 	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
 		args := []interface{}{string(sess.pdid), string(endpoint)}
-		// args := []string{"a", "b", "c", "d"}
-
 		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
 
 		if err != nil {
