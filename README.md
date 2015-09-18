@@ -1,15 +1,11 @@
 Fork of jcelliot's turnpike. 
 
-To run, clone into your go working directory and run:
-    
-    go get $GOPATH/github.com/damouse/rabric
-    go run $GOPATH/github.com/damouse/rabric/exec/main.go
-
-> Warning: installation instructions in progress.
-
-The `exec` directory contains starter scripts for the node as well as lightweight sandbox examples of python clients. 
-It is not intended for developer usage. 
-
-`tests` contains python tests. They're here to aid in blackbox testing of the node.
-
-The `examples` directory contain golang examples for starting the node. For the time being these should be considered out of date. 
+#### Installation Instructions:
+1. (Download and install go )[http://www.jeffduckett.com/blog/55096fe3c6b86364cef12da5/installing-go-1-4-2-on-ubuntu-(trusty)-14-04.html]
+2. (Set GOPATH)[https://golang.org/doc/code.html]. This is where all the go code lives. 
+> $ mkdir $HOME/work
+> $ export GOPATH=$HOME/work
+3. Download the node source code.
+> go get github.com/ParadropLabs/node
+4. Start the node
+> go run $GOPATH/src/github.com/ParadropLabs/node/runner/main.go
