@@ -6,6 +6,7 @@ Fork of jcelliot's turnpike.
 2. [Set GOPATH](https://golang.org/doc/code.html). This is where all the go code lives. 
 
 > $ mkdir $HOME/work
+
 > $ export GOPATH=$HOME/work
 
 3. Download the node source code.
