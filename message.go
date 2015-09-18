@@ -3,6 +3,7 @@ package node
 // Message is a generic container for a WAMP message.
 type Message interface {
 	MessageType() MessageType
+	// Pdid() string
 }
 
 type MessageType int
