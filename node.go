@@ -18,25 +18,26 @@ type Node interface {
 type node struct {
 	closing   bool
 	closeLock sync.Mutex
-	realm     Realm
-	agent     *Client
-	sessions  map[string]Session
+	Authen
+	Broker
+	Dealer
+	Agent
+	agent    *Client
+	sessions map[string]Session
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(pdid string) Node {
 	node := &node{
 		sessions: make(map[string]Session, 0),
+		Authen:   NewAuthen(),
+		Broker:   NewDefaultBroker(),
+		Dealer:   NewDefaultDealer(),
+		Agent:    NewAgent(),
 	}
 
-	realm := Realm{}
-	realm.init()
-
-	// Single realm handles all pubs and subs
-	node.realm = realm
 	node.agent = node.localClient(pdid)
 
-	// Subscribe to meta-level events here
 	return node
 }
 
@@ -133,7 +134,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	// Old implementation: the authentication must occur before fetching the realm
-	welcome, err := n.realm.handleAuth(client, hello.Details)
+	welcome, err := n.Authen.handleAuth(client, hello.Details)
 
 	// Check to make sure PDID is not already registered
 
@@ -177,8 +178,8 @@ func (n *node) SessionClose(sess Session) {
 	sess.Close()
 	out.Notice("Session close: [%s]", sess)
 
-	n.realm.Dealer.lostSession(sess)
-	n.realm.Broker.lostSession(sess)
+	n.Dealer.lostSession(sess)
+	n.Broker.lostSession(sess)
 
 	delete(n.sessions, string(sess.pdid))
 }
@@ -206,6 +207,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		if err != nil {
 			out.Error("Misconstructed endpoint: %s", msg)
 			m := *msg
+
 			err := &Error{
 				Type:    m.MessageType(),
 				Request: sess.Id,
@@ -224,11 +226,46 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		}
 
 	} else {
-		// out.Debug("Unable to determine destination from message: %+v", *msg)
+		// out.Debug("Unable to determine destination from message: %s, %+v", (*msg).MessageType(), *msg)
 		// n.realm.handleMessage(*msg, *sess)
 	}
 
-	n.realm.handleMessage(*msg, *sess)
+	switch msg := (*msg).(type) {
+	case *Goodbye:
+		logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
+		// log.Printf("[%s] leaving: %v", sess, msg.Reason)
+		return
+
+	// Broker messages
+	case *Publish:
+		n.Broker.Publish(sess.Peer, msg)
+	case *Subscribe:
+		n.Broker.Subscribe(sess.Peer, msg)
+	case *Unsubscribe:
+		n.Broker.Unsubscribe(sess.Peer, msg)
+
+	// Dealer messages
+	case *Register:
+		n.Dealer.Register(sess.Peer, msg)
+	case *Unregister:
+		n.Dealer.Unregister(sess.Peer, msg)
+	case *Call:
+		n.Dealer.Call(sess.Peer, msg)
+	case *Yield:
+		n.Dealer.Yield(sess.Peer, msg)
+
+	// Error messages
+	case *Error:
+		if msg.Type == INVOCATION {
+			// the only type of ERROR message the Node should receive
+			n.Dealer.Error(sess.Peer, msg)
+		} else {
+			out.Critical("invalid ERROR message received: %v", msg)
+		}
+
+	default:
+		out.Critical("Unhandled message:", msg.MessageType())
+	}
 }
 
 // Return true or false based on the message and the session which sent the message
@@ -243,6 +280,8 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 		return true
 	}
 
+	return true
+
 	// Is downward action? allow
 	if val := subdomain(string(sess.pdid), string(endpoint)); val {
 		return val
@@ -251,7 +290,7 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	// Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
-	if bouncerActive := n.realm.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
+	if bouncerActive := n.Dealer.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
 		args := []interface{}{string(sess.pdid), string(endpoint)}
 
 		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
@@ -316,30 +355,6 @@ var defaultWelcomeDetails = map[string]interface{}{
 ////////////////////////////////////////
 // Misc and old
 ////////////////////////////////////////
-
-type RealmExistsError string
-
-func (e RealmExistsError) Error() string {
-	return "realm exists: " + string(e)
-}
-
-type NoSuchRealmError string
-
-func (e NoSuchRealmError) Error() string {
-	return "no such realm: " + string(e)
-}
-
-type AuthenticationError string
-
-func (e AuthenticationError) Error() string {
-	return "authentication error: " + string(e)
-}
-
-type InvalidURIError string
-
-func (e InvalidURIError) Error() string {
-	return "invalid URI: " + string(e)
-}
 
 func (n *node) localClient(s string) *Client {
 	p := n.getTestPeer()
