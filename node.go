@@ -24,6 +24,7 @@ type node struct {
 	Agent
 	agent    *Client
 	sessions map[string]Session
+	stats    *NodeStats
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
@@ -34,9 +35,12 @@ func NewNode(pdid string) Node {
 		Broker:   NewDefaultBroker(),
 		Dealer:   NewDefaultDealer(),
 		Agent:    NewAgent(),
+		stats:    NewNodeStats(),
 	}
 
 	node.agent = node.localClient(pdid)
+
+	node.RegisterGetUsage()
 
 	return node
 }
@@ -65,6 +69,8 @@ func (node *node) Close() error {
 
 func (node *node) Accept(client Peer) error {
 	sess, ok := node.Handshake(client)
+
+	node.stats.LogEvent("SessionAccept")
 
 	if ok != nil {
 		return ok
@@ -181,6 +187,8 @@ func (n *node) SessionClose(sess Session) {
 	n.Dealer.lostSession(sess)
 	n.Broker.lostSession(sess)
 
+	n.stats.LogEvent("SessionClose")
+
 	delete(n.sessions, string(sess.pdid))
 }
 
@@ -229,6 +237,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		// out.Debug("Unable to determine destination from message: %s, %+v", (*msg).MessageType(), *msg)
 		// n.realm.handleMessage(*msg, *sess)
 	}
+
+	n.stats.LogMessage(msg)
 
 	switch msg := (*msg).(type) {
 	case *Goodbye:
