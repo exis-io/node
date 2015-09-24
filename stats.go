@@ -3,9 +3,11 @@ package node
 import (
 	"reflect"
 	"sync"
+	"time"
 )
 
 type NodeStats struct {
+	startTime     int64
 	lock          sync.Mutex
 	messages      chan string
 	messageCounts map[string]int64
@@ -13,6 +15,7 @@ type NodeStats struct {
 
 func NewNodeStats() *NodeStats {
 	stats := &NodeStats{
+		startTime: int64(time.Now().Unix()),
 		messages: make(chan string, 1024),
 		messageCounts: make(map[string]int64, 0),
 	}
@@ -57,6 +60,9 @@ func (stats *NodeStats) GetUsage(args []interface{}, kwargs map[string]interface
 	for k, v := range stats.messageCounts {
 		counts[k] = v
 	}
+
+	// The start time tells the receiver when our counters were initialized.
+	counts["start"] = stats.startTime
 	stats.lock.Unlock()
 
 	// Set up the return value: a one element slice containing the map of
