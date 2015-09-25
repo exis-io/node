@@ -1,10 +1,12 @@
 package node
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 )
+
+const ACTION_SEPARATOR string = "/"
+const DOMAIN_SEPARATOR string = "."
 
 // Check out the golang tester for more info:
 // https://regex-golang.appspot.com/assets/html/index.html
@@ -50,10 +52,30 @@ func extractDomain(s string) (string, error) {
 // Checks if the target domain is "down" from the given domain.
 // That is-- it is either a subdomain or the same domain.
 // Assumes the passed domains are well constructed.
+// Agent should be purely a domain string, target may be a domain or an
+// endpoint.
 func subdomain(agent, target string) bool {
-	q := fmt.Sprintf("(^%s)", agent)
-	reg, _ := regexp.Compile(q)
-	return reg.MatchString(target)
+	targetDomain, err := extractDomain(target)
+	if err != nil {
+		// Error means the target was already a domain (no action string).
+		targetDomain = target
+	}
+
+	agentParts := strings.Split(agent, DOMAIN_SEPARATOR)
+	targetParts := strings.Split(targetDomain, DOMAIN_SEPARATOR)
+
+	// Target cannot be a subdomain of agent if it is shorter.
+	if len(targetParts) < len(agentParts) {
+		return false
+	}
+
+	for i := 0; i < len(agentParts) && i < len(targetParts); i++ {
+		if targetParts[i] != agentParts[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // breaks down an endpoint into domain and action, or returns an error

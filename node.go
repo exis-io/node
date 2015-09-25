@@ -290,12 +290,12 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 		return true
 	}
 
-	return true
-
-	// Is downward action? allow
-	if val := subdomain(string(sess.pdid), string(endpoint)); val {
-		return val
+	// Always allow downward actions.
+	if subdomain(string(sess.pdid), string(endpoint)) {
+		return true
 	}
+
+	return true
 
 	// Check permissions cache: if found, allow
 
