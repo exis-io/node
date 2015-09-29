@@ -31,7 +31,6 @@ type node struct {
 func NewNode(pdid string) Node {
 	node := &node{
 		sessions: make(map[string]Session, 0),
-		Authen:   NewAuthen(),
 		Broker:   NewDefaultBroker(),
 		Dealer:   NewDefaultDealer(),
 		Agent:    NewAgent(),
@@ -39,6 +38,7 @@ func NewNode(pdid string) Node {
 	}
 
 	node.agent = node.localClient(pdid)
+	node.Authen = NewAuthen(node)
 
 	node.RegisterGetUsage()
 
@@ -115,7 +115,7 @@ func (node *node) Listen(sess Session) {
 
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
-	sess := Session{}
+	sess := Session{Peer: client, kill: make(chan URI, 1)}
 
 	// Dont accept new sessions if the node is going down
 	if n.closing {
@@ -139,10 +139,10 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
 
-	// Old implementation: the authentication must occur before fetching the realm
-	welcome, err := n.Authen.handleAuth(client, hello.Details)
+	sess.pdid = hello.Realm
 
-	// Check to make sure PDID is not already registered
+	// Old implementation: the authentication must occur before fetching the realm
+	welcome, err := n.Authen.handleAuth(&sess, hello)
 
 	if err != nil {
 		abort := &Abort{
@@ -173,7 +173,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	out.Notice("Session open: [%s]", string(hello.Realm))
-	sess = Session{Peer: client, Id: welcome.Id, pdid: hello.Realm, kill: make(chan URI, 1)}
+	sess.Id = welcome.Id
 	n.sessions[string(hello.Realm)] = sess
 
 	return sess, nil
@@ -293,6 +293,20 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	// Always allow downward actions.
 	if subdomain(string(sess.pdid), string(endpoint)) {
 		return true
+	}
+
+	// Look up auth level of receiver.  The action will not be permitted if the
+	// receiver is more strongly authenticated than the caller.
+	//
+	// This code is only for testing interaction with authenticated agents
+	// without breaking unauthenticated agents.
+	//
+	// TODO: Remove this code when all agents are authenticated.
+	targetDomain, _ := extractDomain(string(endpoint))
+	targetSession, ok := n.sessions[targetDomain]
+	if ok && targetSession.authLevel > sess.authLevel {
+		out.Warning("Communication with authenticated agent %s not permitted", targetSession.pdid)
+		return false
 	}
 
 	return true

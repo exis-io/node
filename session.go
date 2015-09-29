@@ -5,10 +5,23 @@ import (
 	"time"
 )
 
+// Auth levels
+// Low means agent presented a pdid but no credentials.
+// High means agent presented valid credentials.
+// TODO: Remove once all agents are required to be authenticated.
+const (
+	AUTH_NONE = iota
+	AUTH_LOW = iota
+	AUTH_HIGH = iota
+)
+
 type Session struct {
 	Peer
 	Id   ID
 	pdid URI
+
+	// TODO: Remove once authentication is enabled for all agents.
+	authLevel int
 
 	kill chan URI
 }
