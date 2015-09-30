@@ -1,13 +1,26 @@
 package node
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha512"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
 	"time"
 )
 
 const (
 	defaultAuthTimeout = 2 * time.Minute
+	defaultNonceSize = 32
+	defaultHashMethod = "sha512"
 )
 
 // Holds stored certificates, contacts the auth appliance, etc
@@ -15,17 +28,89 @@ type Authen struct {
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
 	AuthTimeout      time.Duration
+	PubKeys          map[string]*rsa.PublicKey
 }
 
 func NewAuthen(node *node) Authen {
 	authen := Authen {
 		CRAuthenticators: make(map[string]CRAuthenticator),
 		AuthTimeout: defaultAuthTimeout,
+		PubKeys: make(map[string]*rsa.PublicKey),
 	}
 
+	authen.LoadPubKeys()
+
 	authen.CRAuthenticators["token"] = NewTokenAuthenticator(node.agent)
+	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node.agent, authen.PubKeys)
 
 	return authen
+}
+
+// Read a public key from a PEM file.
+//
+// PEM files are the ones that look like this:
+// -----BEGIN PUBLIC KEY-----
+// Base64 encoded data...
+// -----END PUBLIC KEY-----
+func ReadPublicKey(path string) (*rsa.PublicKey, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		fmt.Println("read")
+		return nil, err
+	}
+
+	// Decode the PEM public key
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("Error decoding PEM file")
+	}
+
+	// Parse the public key.
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Type assertion: want an rsa.PublicKey.
+	pubkey, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("Error loading RSA public key")
+	}
+
+	return pubkey, nil
+}
+
+// Load public keys from a directory.
+//
+// The directory is specified by the environment variable PUBKEYS.  Each file
+// should be a PEM-encoded public key, and the file name will be used as the
+// authorized pdid.
+//
+// Example: A file named "pd.auth" authorizes the owner of that public key to
+// authenticate as "pd.auth".
+//
+// This feature should only be used for loading core appliances, particularly
+// auth.  Everything else should register with auth, and we will query auth.
+func (r *Authen) LoadPubKeys() {
+	dirname := os.Getenv("PUBKEYS")
+	if dirname == "" {
+		dirname = "."
+	}
+
+	files, _ := ioutil.ReadDir(dirname)
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+
+		path := path.Join(dirname, f.Name())
+
+		pubkey, err := ReadPublicKey(path)
+		if err == nil {
+			fmt.Println("Loaded public key for:", f.Name())
+			r.PubKeys[f.Name()] = pubkey
+		}
+	}
 }
 
 // Move to authn
@@ -230,6 +315,83 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
 		agent: agent,
+	}
+	return authenticator
+}
+
+//
+// Signature Authenticator
+//
+// This is the more secure approach to authentication.
+// 1. The agent holds a private key, and the knows the corresponding public key.
+// 2. During challenge, we send a random string.
+// 3. The agent signs the hash of the challenge string and sends it back.
+// 4. The node verifies the signature against the public key.
+//
+// TODO: We are missing authentication of the node.  The agent should
+// send a challenge to the node, and the node should send back a signed hash.
+//
+
+type SignatureAuthenticator struct {
+	agent *Client
+	PublicKeys map[string]*rsa.PublicKey
+}
+
+func (ta *SignatureAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
+	data := make([]byte, defaultNonceSize)
+	_, err := rand.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("Error generating random nonce")
+	}
+
+	nonce := hex.EncodeToString(data)
+
+	details["challenge"] = nonce
+
+	// Tell the agent what hash method to use.  This gives us a path to upgrade.
+	details["hash"] = defaultHashMethod
+
+	return details, nil
+}
+
+func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
+	pdid := challenge["name"].(string)
+
+	// This is the random nonce that was sent to the agent.
+	nonce := []byte(challenge["challenge"].(string))
+
+	// If we want to support different hash functions, here is where we need to
+	// do it.
+	if challenge["hash"] != "sha512" {
+		fmt.Printf("Warning: hash method %s not supported.\n", challenge["hash"])
+		return nil, fmt.Errorf("Node error: hash method not supported")
+	}
+	hashed := sha512.Sum512(nonce)
+
+	// Decode the base64 encoded signature from the agent.
+	signature, err := base64.StdEncoding.DecodeString(authenticate.Signature)
+	if err != nil {
+		return nil, fmt.Errorf("Error decoding signature")
+	}
+
+	pubkey, _ := ta.PublicKeys[pdid]
+	if pubkey == nil {
+		// TODO: Go ask auth for the public key.
+		return nil, fmt.Errorf("Public key not found")
+	}
+
+	err = rsa.VerifyPKCS1v15(pubkey, crypto.SHA512, hashed[:], signature)
+	if err != nil {
+		return nil, fmt.Errorf("Signature is not correct: %s", err)
+	}
+
+	return nil, nil
+}
+
+func NewSignatureAuthenticator(agent *Client, pubkeys map[string]*rsa.PublicKey) *SignatureAuthenticator {
+	authenticator := &SignatureAuthenticator{
+		agent: agent,
+		PublicKeys: pubkeys,
 	}
 	return authenticator
 }
