@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/ParadropLabs/node"
 )
@@ -20,5 +21,12 @@ func main() {
 		Addr:    ":8000",
 	}
 
-	log.Fatal(server.ListenAndServe())
+	certFile := os.Getenv("EXIS_CERT")
+	keyFile := os.Getenv("EXIS_KEY")
+
+	if certFile != "" && keyFile != "" {
+		log.Fatal(server.ListenAndServeTLS(certFile, keyFile))
+	} else {
+		log.Fatal(server.ListenAndServe())
+	}
 }
