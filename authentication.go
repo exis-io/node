@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
@@ -46,19 +45,7 @@ func NewAuthen(node *node) Authen {
 	return authen
 }
 
-// Read a public key from a PEM file.
-//
-// PEM files are the ones that look like this:
-// -----BEGIN PUBLIC KEY-----
-// Base64 encoded data...
-// -----END PUBLIC KEY-----
-func ReadPublicKey(path string) (*rsa.PublicKey, error) {
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		fmt.Println("read")
-		return nil, err
-	}
-
+func DecodePublicKey(data []byte) (*rsa.PublicKey, error) {
 	// Decode the PEM public key
 	block, _ := pem.Decode(data)
 	if block == nil {
@@ -78,6 +65,22 @@ func ReadPublicKey(path string) (*rsa.PublicKey, error) {
 	}
 
 	return pubkey, nil
+}
+
+// Read a public key from a PEM file.
+//
+// PEM files are the ones that look like this:
+// -----BEGIN PUBLIC KEY-----
+// Base64 encoded data...
+// -----END PUBLIC KEY-----
+func ReadPublicKey(path string) (*rsa.PublicKey, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		fmt.Println("read")
+		return nil, err
+	}
+
+	return DecodePublicKey(data)
 }
 
 // Load public keys from a directory.
@@ -177,8 +180,13 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 		}
 	}
 
+	authid, _ := hello.Details["authid"].(string)
+	if authid == ""{
+		authid = string(session.pdid)
+	}
+
 	details := make(map[string]interface{})
-	details["name"] = string(session.pdid)
+	details["authid"] = authid
 
 	for _, method := range authmethods {
 		if auth, ok := r.CRAuthenticators[method]; ok {
@@ -206,9 +214,16 @@ func (r Authen) checkResponse(session *Session, challenge *Challenge, authentica
 	if auth, ok := r.CRAuthenticators[challenge.AuthMethod]; !ok {
 		return nil, fmt.Errorf("authentication method has been removed")
 	} else {
+		// The agent is doing something funny here if he presents a token for pd.A
+		// but tries to set his pdid to pd.B.  We will allow downward name changes.
+		if !subdomain(challenge.Extra["authid"].(string), string(session.pdid)) {
+			return nil, fmt.Errorf("Requested name not a permitted subdomain")
+		}
+
 		if details, err := auth.Authenticate(challenge.Extra, authenticate); err != nil {
 			return nil, err
 		} else {
+			out.Notice("Session [%s] authenticated by [%s]", session, challenge.AuthMethod)
 			session.authLevel = AUTH_HIGH
 			return &Welcome{Details: addAuthMethod(details, challenge.AuthMethod)}, nil
 		}
@@ -256,12 +271,6 @@ type Authenticator interface {
 // 3. We verify the validity token with the auth appliance.
 //
 
-type TokenAuthResponse struct {
-	Name string
-	Auth string
-	Token string
-}
-
 type TokenAuthenticator struct {
 	agent *Client
 }
@@ -271,34 +280,13 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 }
 
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
-	var response TokenAuthResponse
+	authid := challenge["authid"].(string)
 
-	err := json.Unmarshal([]byte(authenticate.Signature), &response)
-	if err != nil {
-		fmt.Println(err)
-		return nil, fmt.Errorf("Error parsing authentication response")
-	}
-
-	// TODO: Before we can allow arbitrary auth appliances, we need to be able
-	// to verify that an auth appliance has authority over a domain.
-	//
-	// For example, the highest level auth appliance (pd.auth/pd.admin.auth)
-	// can grant tokens for anything under pd, but lower level auth appliances
-	// need to be restricted.
-	if response.Auth != "pd.auth" {
-		return nil, fmt.Errorf("Arbitrary auth appliances are not supported yet")
-	}
-
-	// The agent is doing something funny here if he presents a token for pd.A
-	// but tries to set his pdid to pd.B.  We will allow downward name changes.
-	if !subdomain(response.Name, challenge["name"].(string)) {
-		return nil, fmt.Errorf("Requested name not a permitted subdomain")
-	}
-
-	authEndpoint := response.Auth + "/check_token_1"
+	// TODO: Talk to the right auth appliance.
+	authEndpoint := "pd.auth/check_token_1"
 
 	// Verify the token with auth.
-	args := []interface{}{response.Name, response.Token}
+	args := []interface{}{authid, authenticate.Signature}
 	ret, err := ta.agent.Call(authEndpoint, args, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to verify token with auth")
@@ -355,7 +343,7 @@ func (ta *SignatureAuthenticator) Challenge(details map[string]interface{}) (map
 }
 
 func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
-	pdid := challenge["name"].(string)
+	authid := challenge["authid"].(string)
 
 	// This is the random nonce that was sent to the agent.
 	nonce := []byte(challenge["challenge"].(string))
@@ -374,10 +362,25 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 		return nil, fmt.Errorf("Error decoding signature")
 	}
 
-	pubkey, _ := ta.PublicKeys[pdid]
+	pubkey, _ := ta.PublicKeys[authid]
 	if pubkey == nil {
-		// TODO: Go ask auth for the public key.
-		return nil, fmt.Errorf("Public key not found")
+		args := []interface{}{authid}
+
+		// TODO: Talk to the right auth appliance
+		ret, err := ta.agent.Call("pd.auth/get_appliance_key", args, nil)
+		if err != nil {
+			return nil, fmt.Errorf("Error fetching key from auth: %s", err)
+		}
+
+		pubkeyData, ok := ret.Arguments[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("Key associated with identity not found")
+		}
+
+		pubkey, err = DecodePublicKey([]byte(pubkeyData))
+		if err != nil {
+			return nil, fmt.Errorf("Error decoding public key: %s", err)
+		}
 	}
 
 	err = rsa.VerifyPKCS1v15(pubkey, crypto.SHA512, hashed[:], signature)
