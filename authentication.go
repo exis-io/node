@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 	"time"
 )
 
@@ -114,6 +115,29 @@ func (r *Authen) LoadPubKeys() {
 			r.PubKeys[f.Name()] = pubkey
 		}
 	}
+}
+
+// Generate list of auth appliances that have authority of a given domain
+// starting with the immediate sibling and working up the tree.
+func PotentialAuthAppliances(domain string) ([]string) {
+	var results []string
+
+    parts := strings.Split(domain, ".")
+    for (len(parts) > 1) {
+		// Pop the last part of the domain.
+        parts = parts[:len(parts)-1]
+
+		// Then append auth to get domain of an auth appliance.
+        auth := strings.Join(parts, ".") + ".auth"
+
+		// PotentialAuthAppliances("pd.user.app.auth") should not return
+		// "pd.user.app.auth" as one choice.  This check skips that.
+		if auth != domain {
+			results = append(results, auth)
+		}
+    }
+
+	return results
 }
 
 // Move to authn
@@ -282,22 +306,25 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
 
-	// TODO: Talk to the right auth appliance.
-	authEndpoint := "pd.auth/check_token_1"
+	for _, auth := range PotentialAuthAppliances(authid) {
+		out.Debug("Verifying token for %s with %s", authid, auth)
 
-	// Verify the token with auth.
-	args := []interface{}{authid, authenticate.Signature}
-	ret, err := ta.agent.Call(authEndpoint, args, nil)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to verify token with auth")
+		authEndpoint := auth + "/check_token_1"
+
+		// Verify the token with auth.
+		args := []interface{}{authid, authenticate.Signature}
+		ret, err := ta.agent.Call(authEndpoint, args, nil)
+		if err != nil {
+			continue
+		}
+
+		permitted, ok := ret.Arguments[0].(bool)
+		if ok && permitted {
+			return nil, nil
+		}
 	}
 
-	permitted, ok := ret.Arguments[0].(bool)
-	if ok && permitted {
-		return nil, nil
-	} else {
-		return nil, fmt.Errorf("Token not valid")
-	}
+	return nil, fmt.Errorf("Unable to verify token with auth")
 }
 
 func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
@@ -366,20 +393,29 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
-		// TODO: Talk to the right auth appliance
-		ret, err := ta.agent.Call("pd.auth/get_appliance_key", args, nil)
-		if err != nil {
-			return nil, fmt.Errorf("Error fetching key from auth: %s", err)
+		for _, auth := range PotentialAuthAppliances(authid) {
+			out.Debug("Asking %s for public key of %s", auth, authid)
+
+			authEndpoint := auth + "/get_appliance_key"
+			ret, err := ta.agent.Call(authEndpoint, args, nil)
+			if err != nil {
+				continue
+			}
+
+			pubkeyData, ok := ret.Arguments[0].(string)
+			if !ok {
+				continue
+			}
+
+			pubkey, err = DecodePublicKey([]byte(pubkeyData))
+			if err == nil {
+				// Found the public key.
+				break
+			}
 		}
 
-		pubkeyData, ok := ret.Arguments[0].(string)
-		if !ok {
-			return nil, fmt.Errorf("Key associated with identity not found")
-		}
-
-		pubkey, err = DecodePublicKey([]byte(pubkeyData))
-		if err != nil {
-			return nil, fmt.Errorf("Error decoding public key: %s", err)
+		if pubkey == nil {
+			return nil, fmt.Errorf("Error fetching public key")
 		}
 	}
 
