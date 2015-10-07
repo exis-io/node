@@ -26,6 +26,24 @@ type Dealer interface {
 type RemoteProcedure struct {
 	Endpoint  Sender
 	Procedure URI
+	PassDetails bool
+}
+
+func NewRemoteProcedure(endpoint Sender, procedure URI, tags []string) RemoteProcedure {
+	proc := RemoteProcedure{
+		Endpoint: endpoint,
+		Procedure: procedure,
+		PassDetails: false,
+	}
+
+	for _, tag := range tags {
+		switch {
+		case tag == "details":
+			proc.PassDetails = true
+		}
+	}
+
+	return proc
 }
 
 type defaultDealer struct {
@@ -49,9 +67,19 @@ func NewDefaultDealer() Dealer {
 }
 
 func (d *defaultDealer) Register(callee Sender, msg *Register) {
-	if id, ok := d.registrations[msg.Procedure]; ok {
+	// Endpoint may contain a # sign to pass comma-separated tags.
+	// Example: pd.agent/function#details
+	parts := strings.SplitN(string(msg.Procedure), "#", 2)
+	endpoint := URI(parts[0])
+
+	var tags []string
+	if len(parts) > 1 {
+		tags = strings.Split(parts[1], ",")
+	}
+
+	if id, ok := d.registrations[endpoint]; ok {
 		//log.Println("error: procedure already exists:", msg.Procedure, id)
-		out.Error("error: procedure already exists:", msg.Procedure, id)
+		out.Error("error: procedure already exists:", endpoint, id)
 		callee.Send(&Error{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
@@ -61,8 +89,8 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 		return
 	}
 	reg := NewID()
-	d.procedures[reg] = RemoteProcedure{callee, msg.Procedure}
-	d.registrations[msg.Procedure] = reg
+	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
+	d.registrations[endpoint] = reg
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
 		Request:      msg.Request,
@@ -111,6 +139,40 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 		} else {
 			// everything checks out, make the invocation request
 			// TODO: make the Request ID specific to the caller
+
+			args := msg.Arguments
+			kwargs := msg.ArgumentsKw
+
+			// Remote procedures with the PassDetails flag set will receive a
+			// special first argument set by the node.
+			if rproc.PassDetails {
+				details := make(map[string]interface{})
+
+				// Make sure the argument list exists first.
+				if args == nil {
+					args = make([]interface{}, 0)
+				}
+
+				// Does the caller want to be disclosed?
+				// We default to true unless he explicitly says otherwise.
+				disclose_caller, ok := msg.Options["disclose_me"].(bool)
+				if !ok {
+					disclose_caller = true
+				}
+
+				if disclose_caller {
+					sess := caller.(*Session)
+					if sess != nil {
+						details["caller"] = sess.pdid
+					}
+				}
+
+				// Insert as the first positional argument.
+				args = append(args, nil)
+				copy(args[1:], args[:])
+				args[0] = details
+			}
+
 			d.calls[msg.Request] = caller
 			invocationID := NewID()
 			d.invocations[invocationID] = msg.Request
@@ -118,12 +180,9 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 				Request:      invocationID,
 				Registration: reg,
 				Details:      map[string]interface{}{},
-				Arguments:    msg.Arguments,
-				ArgumentsKw:  msg.ArgumentsKw,
+				Arguments:    args,
+				ArgumentsKw:  kwargs,
 			})
-			//log.Printf("dispatched CALL %v [%v] to callee as INVOCATION %v",
-			// msg.Request, msg.Procedure, invocationID,
-			// )
 		}
 	}
 }
