@@ -506,3 +506,19 @@ func destination(m *Message) (URI, error) {
 		return "", NoDestinationError(msg.MessageType())
 	}
 }
+
+// Given a message, return the request ID
+func requestID(m *Message) ID {
+	switch msg := (*m).(type) {
+	case *Publish:
+		return msg.Request
+	case *Subscribe:
+		return msg.Request
+	case *Register:
+		return msg.Request
+	case *Call:
+		return msg.Request
+	}
+
+	return ID(0)
+}

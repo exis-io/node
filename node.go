@@ -218,7 +218,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 			err := &Error{
 				Type:    m.MessageType(),
-				Request: sess.Id,
+				Request: requestID(msg),
 				Details: map[string]interface{}{"Invalid Endpoint": "Poorly constructed endpoint."},
 				Error:   ErrInvalidUri,
 			}
@@ -230,6 +230,16 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
 		if !n.Permitted(uri, sess) {
 			out.Warning("Action not allowed: %s:%s", sess.pdid, uri)
+
+			m := *msg
+			err := &Error{
+				Type:    m.MessageType(),
+				Request: requestID(msg),
+				Details: map[string]interface{}{"Not Permitted": "Action not permitted."},
+				Error:   ErrNotAuthorized,
+			}
+
+			sess.Peer.Send(err)
 			return
 		}
 
@@ -260,7 +270,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	case *Unregister:
 		n.Dealer.Unregister(sess.Peer, msg)
 	case *Call:
-		n.Dealer.Call(sess.Peer, msg)
+		n.Dealer.Call(sess, msg)
 	case *Yield:
 		n.Dealer.Yield(sess.Peer, msg)
 
@@ -280,11 +290,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 // Return true or false based on the message and the session which sent the message
 func (n *node) Permitted(endpoint URI, sess *Session) bool {
-	// TODO: allow all core appliances to perform whatever they want
-	if sess.pdid == "pd.bouncer" || sess.pdid == "pd.map" || sess.pdid == "pd.auth" {
-		return true
-	}
-
 	// The node is always permitted to perform any action
 	if sess.pdid == n.agent.pdid {
 		return true
@@ -309,19 +314,16 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 		return false
 	}
 
-	return true
-
-	// Check permissions cache: if found, allow
+	// TODO Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
 	if bouncerActive := n.Dealer.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
 		args := []interface{}{string(sess.pdid), string(endpoint)}
 
 		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
-
 		if err != nil {
-			out.Critical("Error, returning true: %s", err)
-			return true
+			out.Critical("Error, returning false: %s", err)
+			return false
 		}
 
 		if permitted, ok := ret.Arguments[0].(bool); ok {
@@ -330,7 +332,6 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 			return permitted
 		} else {
 			out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
-			return true
 		}
 	} else {
 		out.Warning("No bouncer registered!")
