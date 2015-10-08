@@ -4,6 +4,7 @@ package node
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -25,6 +26,7 @@ type node struct {
 	agent    *Client
 	sessions map[string]Session
 	stats    *NodeStats
+	PermMode string
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
@@ -35,6 +37,7 @@ func NewNode(pdid string) Node {
 		Dealer:   NewDefaultDealer(),
 		Agent:    NewAgent(),
 		stats:    NewNodeStats(),
+		PermMode: os.Getenv("EXIS_PERMISSIONS"),
 	}
 
 	node.agent = node.localClient(pdid)
@@ -290,6 +293,11 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 // Return true or false based on the message and the session which sent the message
 func (n *node) Permitted(endpoint URI, sess *Session) bool {
+	// Permissions checking is turned off---only for testing, please!
+	if n.PermMode == "off" {
+		return true
+	}
+
 	// The node is always permitted to perform any action
 	if sess.pdid == n.agent.pdid {
 		return true
