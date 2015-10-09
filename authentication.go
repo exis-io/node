@@ -29,6 +29,7 @@ type Authen struct {
 	Authenticators   map[string]Authenticator
 	AuthTimeout      time.Duration
 	PubKeys          map[string]*rsa.PublicKey
+	AuthMode         string
 }
 
 func NewAuthen(node *node) Authen {
@@ -36,6 +37,7 @@ func NewAuthen(node *node) Authen {
 		CRAuthenticators: make(map[string]CRAuthenticator),
 		AuthTimeout: defaultAuthTimeout,
 		PubKeys: make(map[string]*rsa.PublicKey),
+		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
 	authen.LoadPubKeys()
@@ -191,8 +193,12 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 
 	_authmethods, ok := hello.Details["authmethods"].([]interface{})
 	if !ok {
-		session.authLevel = AUTH_LOW
-		return &Welcome{}, nil
+		if r.AuthMode == "soft" {
+			session.authLevel = AUTH_LOW
+			return &Welcome{}, nil
+		} else {
+			return nil, fmt.Errorf("could not authenticate with any method")
+		}
 	}
 
 	authmethods := []string{}
