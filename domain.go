@@ -49,6 +49,13 @@ func extractDomain(s string) (string, error) {
 	return s[:i], nil
 }
 
+// Extract the top level from a domain.
+// Example: xs.a.b -> xs
+func topLevelDomain(subdomain string) string {
+	parts := strings.Split(subdomain, DOMAIN_SEPARATOR)
+	return parts[0]
+}
+
 // Checks if the target domain is "down" from the given domain.
 // That is-- it is either a subdomain or the same domain.
 // Assumes the passed domains are well constructed.

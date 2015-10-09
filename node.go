@@ -325,10 +325,11 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	// TODO Check permissions cache: if found, allow
 
 	// Check with bouncer on permissions check
-	if bouncerActive := n.Dealer.hasRegistration("pd.bouncer/checkPerm"); bouncerActive {
+	checkPerm := topLevelDomain(targetDomain) + ".bouncer/checkPerm"
+	if bouncerActive := n.Dealer.hasRegistration(checkPerm); bouncerActive {
 		args := []interface{}{string(sess.pdid), string(endpoint)}
 
-		ret, err := n.agent.Call("pd.bouncer/checkPerm", args, nil)
+		ret, err := n.agent.Call(checkPerm, args, nil)
 		if err != nil {
 			out.Critical("Error, returning false: %s", err)
 			return false
