@@ -28,7 +28,6 @@ type Authen struct {
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
 	AuthTimeout      time.Duration
-	PubKeys          map[string]*rsa.PublicKey
 	AuthMode         string
 }
 
@@ -36,14 +35,11 @@ func NewAuthen(node *node) Authen {
 	authen := Authen {
 		CRAuthenticators: make(map[string]CRAuthenticator),
 		AuthTimeout: defaultAuthTimeout,
-		PubKeys: make(map[string]*rsa.PublicKey),
 		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
-	authen.LoadPubKeys()
-
 	authen.CRAuthenticators["token"] = NewTokenAuthenticator(node.agent)
-	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node.agent, authen.PubKeys)
+	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node.agent)
 
 	return authen
 }
@@ -86,37 +82,19 @@ func ReadPublicKey(path string) (*rsa.PublicKey, error) {
 	return DecodePublicKey(data)
 }
 
-// Load public keys from a directory.
+// Try loading a domain's public key from file.
 //
-// The directory is specified by the environment variable PUBKEYS.  Each file
-// should be a PEM-encoded public key, and the file name will be used as the
-// authorized pdid.
-//
-// Example: A file named "pd.auth" authorizes the owner of that public key to
-// authenticate as "pd.auth".
-//
-// This feature should only be used for loading core appliances, particularly
-// auth.  Everything else should register with auth, and we will query auth.
-func (r *Authen) LoadPubKeys() {
+// We check for a filename with the same name as the domain in the
+// directory set by the PUBKEYS environment variable.
+func LoadPublicKey(domain string) (*rsa.PublicKey, error) {
 	dirname := os.Getenv("PUBKEYS")
 	if dirname == "" {
 		dirname = "."
 	}
 
-	files, _ := ioutil.ReadDir(dirname)
-	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-
-		path := path.Join(dirname, f.Name())
-
-		pubkey, err := ReadPublicKey(path)
-		if err == nil {
-			fmt.Println("Loaded public key for:", f.Name())
-			r.PubKeys[f.Name()] = pubkey
-		}
-	}
+	path := path.Join(dirname, domain)
+	pubkey, err := ReadPublicKey(path)
+	return pubkey, err
 }
 
 // Generate list of auth appliances that have authority of a given domain
@@ -355,7 +333,6 @@ func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
 
 type SignatureAuthenticator struct {
 	agent *Client
-	PublicKeys map[string]*rsa.PublicKey
 }
 
 func (ta *SignatureAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
@@ -395,7 +372,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 		return nil, fmt.Errorf("Error decoding signature")
 	}
 
-	pubkey, _ := ta.PublicKeys[authid]
+	pubkey, _ := LoadPublicKey(authid)
 	if pubkey == nil {
 		args := []interface{}{authid}
 
@@ -433,10 +410,9 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	return nil, nil
 }
 
-func NewSignatureAuthenticator(agent *Client, pubkeys map[string]*rsa.PublicKey) *SignatureAuthenticator {
+func NewSignatureAuthenticator(agent *Client) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
 		agent: agent,
-		PublicKeys: pubkeys,
 	}
 	return authenticator
 }
