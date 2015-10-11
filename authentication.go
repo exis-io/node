@@ -13,7 +13,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"strings"
 	"time"
 )
 
@@ -95,29 +94,6 @@ func LoadPublicKey(domain string) (*rsa.PublicKey, error) {
 	path := path.Join(dirname, domain)
 	pubkey, err := ReadPublicKey(path)
 	return pubkey, err
-}
-
-// Generate list of auth appliances that have authority of a given domain
-// starting with the immediate sibling and working up the tree.
-func PotentialAuthAppliances(domain string) ([]string) {
-	var results []string
-
-    parts := strings.Split(domain, ".")
-    for (len(parts) > 1) {
-		// Pop the last part of the domain.
-        parts = parts[:len(parts)-1]
-
-		// Then append auth to get domain of an auth appliance.
-        auth := strings.Join(parts, ".") + ".auth"
-
-		// PotentialAuthAppliances("pd.user.app.auth") should not return
-		// "pd.user.app.auth" as one choice.  This check skips that.
-		if auth != domain {
-			results = append(results, auth)
-		}
-    }
-
-	return results
 }
 
 // Move to authn
@@ -290,7 +266,7 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
 
-	for _, auth := range PotentialAuthAppliances(authid) {
+	for _, auth := range ancestorDomains(authid, "auth") {
 		out.Debug("Verifying token for %s with %s", authid, auth)
 
 		authEndpoint := auth + "/check_token_1"
@@ -376,7 +352,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
-		for _, auth := range PotentialAuthAppliances(authid) {
+		for _, auth := range ancestorDomains(authid, "auth") {
 			out.Debug("Asking %s for public key of %s", auth, authid)
 
 			authEndpoint := auth + "/get_appliance_key"

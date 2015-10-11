@@ -56,6 +56,35 @@ func topLevelDomain(subdomain string) string {
 	return parts[0]
 }
 
+// Generate list of ancestors up to the top level.
+// If add is not "", it will be appended to each result.
+// A result is not returned if it is equal to the argument domain.
+//
+// Example:
+// ancestorDomains("xs.X.Y", "") -> ["xs.X", "xs"]
+// ancestorDomains("xs.X.Y.Z", "auth") -> ["xs.X.Y.auth", "xs.X.auth", "xs.auth"]
+// ancestorDomains("xs.X.Y.auth", "auth") -> ["xs.X.auth", "xs.auth"]
+func ancestorDomains(domain string, add string) ([]string) {
+    var results []string
+
+    parts := strings.Split(domain, ".")
+    for (len(parts) > 1) {
+        // Pop the last part of the domain.
+        parts = parts[:len(parts)-1]
+
+		newResult := strings.Join(parts, ".")
+		if add != "" {
+			newResult = newResult + "." + add
+		}
+
+        if newResult != domain {
+            results = append(results, newResult)
+        }
+    }
+
+    return results
+}
+
 // Checks if the target domain is "down" from the given domain.
 // That is-- it is either a subdomain or the same domain.
 // Assumes the passed domains are well constructed.

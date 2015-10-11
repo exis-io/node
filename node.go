@@ -324,29 +324,38 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 
 	// TODO Check permissions cache: if found, allow
 
-	// Check with bouncer on permissions check
-	checkPerm := topLevelDomain(targetDomain) + ".bouncer/checkPerm"
-	if bouncerActive := n.Dealer.hasRegistration(checkPerm); bouncerActive {
-		args := []interface{}{string(sess.pdid), string(endpoint)}
+	// Check with bouncer(s) on permissions check.
+	// At least one bouncer needs to approve a non-downward action.
+	for _, bouncer := range ancestorDomains(targetDomain, "bouncer") {
+		checkPerm := bouncer + "/checkPerm"
 
+		bouncerActive := n.Dealer.hasRegistration(checkPerm)
+		if !bouncerActive {
+			continue
+		}
+
+		args := []interface{}{string(sess.pdid), string(endpoint)}
 		ret, err := n.agent.Call(checkPerm, args, nil)
 		if err != nil {
 			out.Critical("Error, returning false: %s", err)
-			return false
+			continue
 		}
 
 		if permitted, ok := ret.Arguments[0].(bool); ok {
-			// out.Debug("Bouncer returning %s", permitted)
+			if !ok {
+				out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
+				continue
+			}
+
+			if ok && permitted {
+				return true
+			}
+
 			// TODO: save a permitted action in some flavor of cache
-			return permitted
-		} else {
-			out.Critical("Could not extract permission from return val. Bouncer called and returnd: %s", ret.Arguments)
 		}
-	} else {
-		out.Warning("No bouncer registered!")
 	}
 
-	// Action is not permitted
+	// No bouncer approved it.
 	return false
 }
 
