@@ -175,7 +175,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, err
 	}
 
-	out.Notice("Session open: [%s]", string(hello.Realm))
+	out.Notice("Session open: %s", string(hello.Realm))
 	sess.Id = welcome.Id
 	n.sessions[string(hello.Realm)] = sess
 
@@ -185,7 +185,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 // Called when a session is closed or closes itself
 func (n *node) SessionClose(sess Session) {
 	sess.Close()
-	out.Notice("Session close: [%s]", sess)
+	out.Notice("Session close: %s", sess)
 
 	n.Dealer.lostSession(sess)
 	n.Broker.lostSession(sess)
@@ -195,24 +195,36 @@ func (n *node) SessionClose(sess Session) {
 	delete(n.sessions, string(sess.pdid))
 }
 
+func (n *node) LogMessage(msg *Message, sess *Session) {
+	// Extract the target domain from the message
+	target, err := destination(msg)
+
+	// Make errors nice and pretty. These are riffle error messages, not node errors
+	m := *msg
+	if m.MessageType() == ERROR {
+		out.Warning("%s from %s", m.MessageType(), *sess)
+	} else if err == nil {
+		out.Debug("%s %s from %s", m.MessageType(), string(target), *sess)
+	} else {
+		out.Debug("%s from %s", m.MessageType(), *sess)
+	}
+
+	n.stats.CountMessage(msg)
+}
+
 // Handle a new message
 func (n *node) Handle(msg *Message, sess *Session) {
 	// NOTE: there is a serious shortcoming here: How do we deal with WAMP messages with an
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
 
-	// Make errors nice and pretty. These are riffle error messages, not node errors
-	m := *msg
-	if m.MessageType() == ERROR {
-		out.Warning("[%s] %s: %+v", *sess, m.MessageType(), *msg)
-	} else {
-		out.Debug("[%s] %s: %+v", *sess, m.MessageType(), *msg)
-	}
+	n.LogMessage(msg, sess)
 
 	// Extract the target domain from the message
-	if uri, ok := destination(msg); ok == nil {
+	target, err := destination(msg)
+	if err == nil {
 		// Ensure the construction of the message is valid, extract the endpoint, domain, and action
-		_, _, err := breakdownEndpoint(string(uri))
+		_, _, err := breakdownEndpoint(string(target))
 
 		// Return a WAMP error to the user indicating a poorly constructed endpoint
 		if err != nil {
@@ -231,8 +243,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		}
 
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
-		if !n.Permitted(uri, sess) {
-			out.Warning("Action not allowed: %s:%s", sess.pdid, uri)
+		if !n.Permitted(target, sess) {
+			out.Warning("Action not allowed: %s:%s", sess.pdid, target)
 
 			m := *msg
 			err := &Error{
@@ -245,13 +257,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			sess.Peer.Send(err)
 			return
 		}
-
-	} else {
-		// out.Debug("Unable to determine destination from message: %s, %+v", (*msg).MessageType(), *msg)
-		// n.realm.handleMessage(*msg, *sess)
 	}
-
-	n.stats.LogMessage(msg)
 
 	switch msg := (*msg).(type) {
 	case *Goodbye:

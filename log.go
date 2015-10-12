@@ -8,7 +8,7 @@ import (
 
 // Check out their github page for more info on the coloring
 var format = logging.MustStringFormatter(
-	"%{color}[%{longfunc}]  %{message}%{color:reset}",
+	"%{color}[%{time:2006-01-02 15:04:05.000} %{longfunc}] %{message}%{color:reset}",
 	// "[%{color}%{time:15:04:05.000} %{longfunc}]  %{message}",
 )
 

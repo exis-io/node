@@ -31,14 +31,14 @@ func (stats *NodeStats) CountEventsRoutine() {
 	}
 }
 
-// LogMessage puts a message on the queue for consumption by CountEventsRoutine.
+// CountMessage puts a message on the queue for consumption by CountEventsRoutine.
 // We are just using reflection here to log different message types.
-func (stats *NodeStats) LogMessage(msg *Message) {
+func (stats *NodeStats) CountMessage(msg *Message) {
 	typeName := reflect.TypeOf(*msg).Elem().Name()
 	stats.messages <- typeName
 }
 
-// LogMessage puts a message on the queue for consumption by CountEventsRoutine.
+// CountMessage puts a message on the queue for consumption by CountEventsRoutine.
 // We are counting the occurences of each unique string.
 func (stats *NodeStats) LogEvent(msg string) {
 	stats.messages <- msg
