@@ -110,8 +110,14 @@ func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
 }
 
 // Remove all the subs for a session that has disconected
-func (br *defaultBroker) lostSession(sess Session) {
+func (br *defaultBroker) lostSession(sess *Session) {
+	for id, topic := range(br.subscriptions[sess]) {
+		out.Debug("Unsubscribe: %s from %s", sess, string(topic))
+		delete(br.subscriptions[sess], id)
+		delete(br.routes[topic], id)
+	}
 
+    delete(br.subscriptions, sess)
 }
 
 func (b *defaultBroker) dump() string {
