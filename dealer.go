@@ -51,10 +51,13 @@ type defaultDealer struct {
 	procedures map[ID]RemoteProcedure
 	// map procedure URIs to registration IDs
 	registrations map[URI]ID
-	// keep track of call IDs so we can send the response to the caller
-	calls map[ID]Sender
-	// link the invocation ID to the call ID
-	invocations map[ID]ID
+
+	// Map InvocationID to RequestID so we can send the RequestID with the
+	// result (lets caller know what request the result is for).
+	requests map[ID]ID
+
+	// Map InvocationID to Sender so we know where to send the response.
+	callers map[ID]Sender
 
 	// Keep track of registrations by session, so that we can clean up when the
 	// session closes.  For each session, we have a map[URI]bool, which we are
@@ -67,8 +70,8 @@ func NewDefaultDealer() Dealer {
 	return &defaultDealer{
 		procedures:    make(map[ID]RemoteProcedure),
 		registrations: make(map[URI]ID),
-		calls:         make(map[ID]Sender),
-		invocations:   make(map[ID]ID),
+		requests:      make(map[ID]ID),
+		callers:       make(map[ID]Sender),
 		sessionRegistrations: make(map[Sender]map[URI]bool),
 	}
 }
@@ -95,6 +98,7 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 		})
 		return
 	}
+
 	reg := NewID()
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
 	d.registrations[endpoint] = reg
@@ -152,8 +156,6 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 			})
 		} else {
 			// everything checks out, make the invocation request
-			// TODO: make the Request ID specific to the caller
-
 			args := msg.Arguments
 			kwargs := msg.ArgumentsKw
 
@@ -187,9 +189,10 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 				args[0] = details
 			}
 
-			d.calls[msg.Request] = caller
 			invocationID := NewID()
-			d.invocations[invocationID] = msg.Request
+			d.requests[invocationID] = msg.Request
+			d.callers[invocationID] = caller
+
 			rproc.Endpoint.Send(&Invocation{
 				Request:      invocationID,
 				Registration: reg,
@@ -202,54 +205,63 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 }
 
 func (d *defaultDealer) Yield(callee Sender, msg *Yield) {
-	if callID, ok := d.invocations[msg.Request]; !ok {
+	caller, ok := d.callers[msg.Request]
+	if !ok {
 		// WAMP spec doesn't allow sending an error in response to a YIELD message
 		//log.Println("received YIELD message with invalid invocation request ID:", msg.Request)
-	} else {
-		delete(d.invocations, msg.Request)
-		if caller, ok := d.calls[callID]; !ok {
-			// found the invocation id, but doesn't match any call id
-			// WAMP spec doesn't allow sending an error in response to a YIELD message
-			//log.Printf("received YIELD message, but unable to match it (%v) to a CALL ID", msg.Request)
-		} else {
-			delete(d.calls, callID)
-			// return the result to the caller
-			caller.Send(&Result{
-				Request:     callID,
-				Details:     map[string]interface{}{},
-				Arguments:   msg.Arguments,
-				ArgumentsKw: msg.ArgumentsKw,
-			})
-			//log.Printf("returned YIELD %v to caller as RESULT %v", msg.Request, callID)
-		}
+		return
 	}
+
+	delete(d.callers, msg.Request)
+
+	requestId, ok := d.requests[msg.Request]
+	if !ok {
+		return
+	}
+
+	delete(d.requests, msg.Request)
+
+	// return the result to the caller
+	caller.Send(&Result{
+		Request:     requestId,
+		Details:     map[string]interface{}{},
+		Arguments:   msg.Arguments,
+		ArgumentsKw: msg.ArgumentsKw,
+	})
 }
 
 func (d *defaultDealer) Error(peer Sender, msg *Error) {
-	if callID, ok := d.invocations[msg.Request]; !ok {
+	caller, ok := d.callers[msg.Request]
+	if !ok {
 		//log.Println("received ERROR (INVOCATION) message with invalid invocation request ID:", msg.Request)
-	} else {
-		delete(d.invocations, msg.Request)
-		if caller, ok := d.calls[callID]; !ok {
-			//log.Printf("received ERROR (INVOCATION) message, but unable to match it (%v) to a CALL ID", msg.Request)
-		} else {
-			delete(d.calls, callID)
-			// return an error to the caller
-			caller.Send(&Error{
-				Type:        CALL,
-				Request:     callID,
-				Details:     make(map[string]interface{}),
-				Arguments:   msg.Arguments,
-				ArgumentsKw: msg.ArgumentsKw,
-				Error:       msg.Error,
-			})
-			//log.Printf("returned ERROR %v to caller as ERROR %v", msg.Request, callID)
-		}
+		return
 	}
+
+	delete(d.callers, msg.Request)
+
+	requestId, ok := d.requests[msg.Request]
+	if !ok {
+		//log.Printf("received ERROR (INVOCATION) message, but unable to match it (%v) to a CALL ID", msg.Request)
+		return
+	}
+
+	delete(d.requests, msg.Request)
+
+	// return an error to the caller
+	caller.Send(&Error{
+		Type:        CALL,
+		Request:     requestId,
+		Details:     make(map[string]interface{}),
+		Arguments:   msg.Arguments,
+		ArgumentsKw: msg.ArgumentsKw,
+		Error:       msg.Error,
+	})
 }
 
 // Remove all the registrations for a session that has disconected
 func (d *defaultDealer) lostSession(sess *Session) {
+	// TODO: Do something about outstanding requests
+
 	for uri, _ := range(d.sessionRegistrations[sess]) {
 		out.Debug("Unregister: %s", string(uri))
 		delete(d.procedures, d.registrations[uri])
@@ -272,15 +284,15 @@ func (d *defaultDealer) dump() string {
 		ret += "\n\t" + string(k) + ": " + strconv.FormatUint(uint64(v), 16)
 	}
 
-	ret += "\n  calls:"
+	ret += "\n  callers:"
 
-	for k, _ := range d.calls {
+	for k, _ := range d.callers {
 		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": (sender)"
 	}
 
-	ret += "\n  invocations:"
+	ret += "\n  requests:"
 
-	for k, v := range d.invocations {
+	for k, v := range d.requests {
 		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
 	}
 
