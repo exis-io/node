@@ -139,8 +139,7 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 	// }
 
 	// If client is a local peer, allow it without authentication.
-	_, ok := session.Peer.(*localPeer)
-	if ok {
+	if session.isLocal() {
 		session.authLevel = AUTH_HIGH
 		return &Welcome{}, nil
 	}
@@ -164,13 +163,13 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 		}
 	}
 
-	authid, _ := hello.Details["authid"].(string)
-	if authid == ""{
-		authid = string(session.pdid)
+	session.authid, _ = hello.Details["authid"].(string)
+	if session.authid == "" {
+		session.authid = string(session.pdid)
 	}
 
 	details := make(map[string]interface{})
-	details["authid"] = authid
+	details["authid"] = session.authid
 
 	for _, method := range authmethods {
 		if auth, ok := r.CRAuthenticators[method]; ok {

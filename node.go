@@ -305,12 +305,12 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	}
 
 	// The node is always permitted to perform any action
-	if sess.pdid == n.agent.pdid {
+	if sess.isLocal() {
 		return true
 	}
 
 	// Always allow downward actions.
-	if subdomain(string(sess.pdid), string(endpoint)) {
+	if subdomain(string(sess.authid), string(endpoint)) {
 		return true
 	}
 
@@ -340,7 +340,7 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 			continue
 		}
 
-		args := []interface{}{string(sess.pdid), string(endpoint)}
+		args := []interface{}{string(sess.authid), string(endpoint)}
 		ret, err := n.agent.Call(checkPerm, args, nil)
 		if err != nil {
 			out.Critical("Error, returning false: %s", err)

@@ -20,6 +20,10 @@ type Session struct {
 	Id   ID
 	pdid URI
 
+	// authid is the highest domain the agent has been authenticated as,
+	// so it is the one we should use for permissions checking.
+	authid string
+
 	// TODO: Remove once authentication is enabled for all agents.
 	authLevel int
 
@@ -28,6 +32,12 @@ type Session struct {
 
 func (s Session) String() string {
 	return fmt.Sprintf("%s", s.pdid)
+}
+
+// Test if session is a local (built-in) peer.
+func (s *Session) isLocal() bool {
+	_, ok := s.Peer.(*localPeer)
+	return ok
 }
 
 // localPipe creates two linked sessions. Messages sent to one will
