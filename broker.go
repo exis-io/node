@@ -12,20 +12,24 @@ type Broker interface {
 	Unsubscribe(Sender, *Unsubscribe)
 	dump() string
 	hasSubscription(string) bool
-	lostSession(Session)
+	lostSession(*Session)
 }
 
 // A super simple broker that matches URIs to Subscribers.
 type defaultBroker struct {
 	routes        map[URI]map[ID]Sender
-	subscriptions map[ID]URI
+
+	// Keep track of subscriptions by session, so that we can clean up when the
+	// session closes.  For each session, we have a map[ID]URI, which maps
+	// subscription ID to the endpoint.
+	subscriptions map[Sender]map[ID]URI
 }
 
 // NewDefaultBroker initializes and returns a simple broker that matches URIs to Subscribers.
 func NewDefaultBroker() Broker {
 	return &defaultBroker{
 		routes:        make(map[URI]map[ID]Sender),
-		subscriptions: make(map[ID]URI),
+		subscriptions: make(map[Sender]map[ID]URI),
 	}
 }
 
@@ -68,13 +72,16 @@ func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
 	id := NewID()
 	br.routes[msg.Topic][id] = sub
 
-	br.subscriptions[id] = msg.Topic
+	if br.subscriptions[sub] == nil {
+		br.subscriptions[sub] = make(map[ID]URI)
+	}
+	br.subscriptions[sub][id] = msg.Topic
 
 	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
 }
 
 func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
-	topic, ok := br.subscriptions[msg.Subscription]
+	topic, ok := br.subscriptions[sub][msg.Subscription]
 	if !ok {
 		err := &Error{
 			Type:    msg.MessageType(),
@@ -86,7 +93,7 @@ func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
 		return
 	}
 
-	delete(br.subscriptions, msg.Subscription)
+	delete(br.subscriptions[sub], msg.Subscription)
 
 	if r, ok := br.routes[topic]; !ok {
 		//log.Printf("Error unsubscribing: unable to find routes for %s topic", topic)
@@ -120,8 +127,10 @@ func (b *defaultBroker) dump() string {
 
 	ret += "\n  subs:"
 
-	for k, v := range b.subscriptions {
-		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + string(v)
+	for sub, _ := range b.subscriptions {
+		for k, v := range b.subscriptions[sub] {
+			ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + string(v)
+		}
 	}
 
 	return ret

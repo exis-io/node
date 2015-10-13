@@ -11,7 +11,7 @@ import (
 
 type Node interface {
 	Accept(Peer) error
-	Listen(Session)
+	Listen(*Session)
 	Close() error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
 }
@@ -81,13 +81,13 @@ func (node *node) Accept(client Peer) error {
 
 	// Start listening on the session
 	// This will eventually move to the session
-	go node.Listen(sess)
+	go node.Listen(&sess)
 
 	return nil
 }
 
 // Spin on a session, wait for messages to arrive. Method does not return
-func (node *node) Listen(sess Session) {
+func (node *node) Listen(sess *Session) {
 	c := sess.Receive()
 
 	for {
@@ -112,7 +112,7 @@ func (node *node) Listen(sess Session) {
 			return
 		}
 
-		node.Handle(&msg, &sess)
+		node.Handle(&msg, sess)
 	}
 }
 
@@ -183,7 +183,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 }
 
 // Called when a session is closed or closes itself
-func (n *node) SessionClose(sess Session) {
+func (n *node) SessionClose(sess *Session) {
 	sess.Close()
 	out.Notice("Session close: %s", sess)
 
@@ -267,27 +267,27 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 	// Broker messages
 	case *Publish:
-		n.Broker.Publish(sess.Peer, msg)
+		n.Broker.Publish(sess, msg)
 	case *Subscribe:
-		n.Broker.Subscribe(sess.Peer, msg)
+		n.Broker.Subscribe(sess, msg)
 	case *Unsubscribe:
-		n.Broker.Unsubscribe(sess.Peer, msg)
+		n.Broker.Unsubscribe(sess, msg)
 
 	// Dealer messages
 	case *Register:
-		n.Dealer.Register(sess.Peer, msg)
+		n.Dealer.Register(sess, msg)
 	case *Unregister:
-		n.Dealer.Unregister(sess.Peer, msg)
+		n.Dealer.Unregister(sess, msg)
 	case *Call:
 		n.Dealer.Call(sess, msg)
 	case *Yield:
-		n.Dealer.Yield(sess.Peer, msg)
+		n.Dealer.Yield(sess, msg)
 
 	// Error messages
 	case *Error:
 		if msg.Type == INVOCATION {
 			// the only type of ERROR message the Node should receive
-			n.Dealer.Error(sess.Peer, msg)
+			n.Dealer.Error(sess, msg)
 		} else {
 			out.Critical("invalid ERROR message received: %v", msg)
 		}
@@ -384,7 +384,7 @@ func (r *node) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer,
 		details = make(map[string]interface{})
 	}
 
-	go r.Listen(sess)
+	go r.Listen(&sess)
 	return peerB, nil
 }
 

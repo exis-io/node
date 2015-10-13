@@ -20,7 +20,7 @@ type Dealer interface {
 	Error(Sender, *Error)
 	dump() string
 	hasRegistration(string) bool
-	lostSession(Session)
+	lostSession(*Session)
 }
 
 type RemoteProcedure struct {
@@ -55,6 +55,12 @@ type defaultDealer struct {
 	calls map[ID]Sender
 	// link the invocation ID to the call ID
 	invocations map[ID]ID
+
+	// Keep track of registrations by session, so that we can clean up when the
+	// session closes.  For each session, we have a map[URI]bool, which we are
+	// using as a set of registrations (store true for register, delete for
+	// unregister).
+	sessionRegistrations map[Sender]map[URI]bool
 }
 
 func NewDefaultDealer() Dealer {
@@ -63,6 +69,7 @@ func NewDefaultDealer() Dealer {
 		registrations: make(map[URI]ID),
 		calls:         make(map[ID]Sender),
 		invocations:   make(map[ID]ID),
+		sessionRegistrations: make(map[Sender]map[URI]bool),
 	}
 }
 
@@ -91,6 +98,12 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 	reg := NewID()
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
 	d.registrations[endpoint] = reg
+
+	if d.sessionRegistrations[callee] == nil {
+		d.sessionRegistrations[callee] = make(map[URI]bool)
+	}
+	d.sessionRegistrations[callee][endpoint] = true
+
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
 		Request:      msg.Request,
@@ -109,6 +122,7 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) {
 			Error:   ErrNoSuchRegistration,
 		})
 	} else {
+		delete(d.sessionRegistrations[callee], procedure.Procedure)
 		delete(d.registrations, procedure.Procedure)
 		delete(d.procedures, msg.Registration)
 		//log.Printf("unregistered procedure %v [%v]", procedure.Procedure, msg.Registration)
@@ -235,20 +249,14 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) {
 }
 
 // Remove all the registrations for a session that has disconected
-func (d *defaultDealer) lostSession(sess Session) {
-	rem := make([]URI, 0)
-
-	for k, _ := range d.registrations {
-		if strings.Contains(string(k), string(sess.pdid)+"/") {
-			// out.Debug("Deleting %s %s", k, v)
-			rem = append(rem, k)
-		}
+func (d *defaultDealer) lostSession(sess *Session) {
+	for uri, _ := range(d.sessionRegistrations[sess]) {
+		out.Debug("Unregister: %s", string(uri))
+		delete(d.procedures, d.registrations[uri])
+		delete(d.registrations, uri)
 	}
 
-	for _, x := range rem {
-		delete(d.procedures, d.registrations[x])
-		delete(d.registrations, x)
-	}
+	delete(d.sessionRegistrations, sess)
 }
 
 func (d *defaultDealer) dump() string {
