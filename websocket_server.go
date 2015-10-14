@@ -43,8 +43,8 @@ type WebsocketServer struct {
 	BinarySerializer Serializer
 }
 
-func CreateNode(pdid string) *WebsocketServer {
-	r := NewNode(pdid)
+func CreateNode(config *NodeConfig) *WebsocketServer {
+	r := NewNode(config)
 	s := newWebsocketServer(r)
 	return s
 }

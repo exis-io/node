@@ -10,11 +10,16 @@ import (
 
 // var client *rabric.Client
 
+var config node.NodeConfig
+
 func main() {
 	node.Log()
 
+	// TODO: configurable location for config file.
+	config, _ := node.LoadConfig("config.json")
+
 	// Pass certificate here
-	s := node.CreateNode("pd.routers.aardvark")
+	s := node.CreateNode(config)
 
 	server := &http.Server{
 		Handler: s,

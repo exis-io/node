@@ -27,10 +27,11 @@ type node struct {
 	sessions map[string]Session
 	stats    *NodeStats
 	PermMode string
+	Config   *NodeConfig
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
-func NewNode(pdid string) Node {
+func NewNode(config *NodeConfig) Node {
 	node := &node{
 		sessions: make(map[string]Session, 0),
 		Broker:   NewDefaultBroker(),
@@ -38,9 +39,10 @@ func NewNode(pdid string) Node {
 		Agent:    NewAgent(),
 		stats:    NewNodeStats(),
 		PermMode: os.Getenv("EXIS_PERMISSIONS"),
+		Config:   config,
 	}
 
-	node.agent = node.localClient(pdid)
+	node.agent = node.localClient(config.Agent)
 	node.Authen = NewAuthen(node)
 
 	node.RegisterGetUsage()
@@ -90,9 +92,15 @@ func (node *node) Accept(client Peer) error {
 func (node *node) Listen(sess *Session) {
 	c := sess.Receive()
 
+	limit := node.Config.GetRequestLimit(sess.authid)
+	limiter := NewBasicLimiter(limit)
+	out.Debug("Request rate limit for %s: %d/s", sess, limit)
+
 	for {
 		var open bool
 		var msg Message
+
+		limiter.Acquire()
 
 		select {
 		case msg, open = <-c:
@@ -143,6 +151,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	sess.pdid = hello.Realm
+	sess.authid = string(hello.Realm)
 
 	// Old implementation: the authentication must occur before fetching the realm
 	welcome, err := n.Authen.handleAuth(&sess, hello)
