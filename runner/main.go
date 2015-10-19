@@ -1,11 +1,11 @@
 package main
 
 import (
+	"flag"
+	"github.com/ParadropLabs/node"
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/ParadropLabs/node"
 )
 
 // var client *rabric.Client
@@ -15,8 +15,10 @@ var config node.NodeConfig
 func main() {
 	node.Log()
 
-	// TODO: configurable location for config file.
-	config, _ := node.LoadConfig("config.json")
+	//
+	var configPath = flag.String("configpath", "config.json", "the configuration file for the node")
+	flag.Parse()
+	config, _ := node.LoadConfig(*configPath)
 
 	// Pass certificate here
 	s := node.CreateNode(config)
