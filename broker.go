@@ -1,6 +1,9 @@
 package node
 
-import "strconv"
+import (
+	"strconv"
+	"sync"
+)
 
 // A broker handles routing EVENTS from Publishers to Subscribers.
 type Broker interface {
@@ -23,6 +26,10 @@ type defaultBroker struct {
 	// session closes.  For each session, we have a map[ID]URI, which maps
 	// subscription ID to the endpoint.
 	subscriptions map[Sender]map[ID]URI
+
+	// Use this mutex to protect all accesses to the routes and subscriptions
+	// maps.
+	subMutex sync.Mutex
 }
 
 // NewDefaultBroker initializes and returns a simple broker that matches URIs to Subscribers.
@@ -47,14 +54,23 @@ func (br *defaultBroker) Publish(pub Sender, msg *Publish) {
 		Details:     make(map[string]interface{}),
 	}
 
+	// Make a copy of the subscriber list so we don't hold the lock during the
+	// send calls.
+	subs := make(map[ID]Sender)
+	br.subMutex.Lock()
 	for id, sub := range br.routes[msg.Topic] {
+		// don't send event to publisher
+		if sub != pub {
+			subs[id] = sub
+		}
+	}
+	br.subMutex.Unlock()
+
+	for id, sub := range subs {
 		// shallow-copy the template
 		event := evtTemplate
 		event.Subscription = id
-		// don't send event to publisher
-		if sub != pub {
-			sub.Send(&event)
-		}
+		sub.Send(&event)
 	}
 
 	// only send published message if acknowledge is present and set to true
@@ -65,6 +81,8 @@ func (br *defaultBroker) Publish(pub Sender, msg *Publish) {
 
 // Subscribe subscribes the client to the given topic.
 func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
+	br.subMutex.Lock()
+
 	if _, ok := br.routes[msg.Topic]; !ok {
 		br.routes[msg.Topic] = make(map[ID]Sender)
 	}
@@ -77,12 +95,18 @@ func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
 	}
 	br.subscriptions[sub][id] = msg.Topic
 
+	br.subMutex.Unlock()
+
 	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
 }
 
 func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
+	br.subMutex.Lock()
+
 	topic, ok := br.subscriptions[sub][msg.Subscription]
 	if !ok {
+		br.subMutex.Unlock()
+
 		err := &Error{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
@@ -106,11 +130,15 @@ func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
 		}
 	}
 
+	br.subMutex.Unlock()
+
 	sub.Send(&Unsubscribed{Request: msg.Request})
 }
 
 // Remove all the subs for a session that has disconected
 func (br *defaultBroker) lostSession(sess *Session) {
+	br.subMutex.Lock()
+
 	for id, topic := range(br.subscriptions[sess]) {
 		out.Debug("Unsubscribe: %s from %s", sess, string(topic))
 		delete(br.subscriptions[sess], id)
@@ -118,6 +146,8 @@ func (br *defaultBroker) lostSession(sess *Session) {
 	}
 
     delete(br.subscriptions, sess)
+
+	br.subMutex.Unlock()
 }
 
 func (b *defaultBroker) dump() string {
@@ -144,6 +174,8 @@ func (b *defaultBroker) dump() string {
 
 // Testing. Not sure if this works 100 or not
 func (b *defaultBroker) hasSubscription(s string) bool {
+	b.subMutex.Lock()
 	_, exists := b.routes[URI(s)]
+	b.subMutex.Unlock()
 	return exists
 }
