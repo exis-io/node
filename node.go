@@ -23,11 +23,12 @@ type node struct {
 	Broker
 	Dealer
 	Agent
-	agent    *Client
-	sessions map[string]Session
-	stats    *NodeStats
-	PermMode string
-	Config   *NodeConfig
+	agent       *Client
+	sessions    map[string]Session
+	sessionLock sync.RWMutex
+	stats       *NodeStats
+	PermMode    string
+	Config      *NodeConfig
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
@@ -62,12 +63,17 @@ func (node *node) Close() error {
 	node.closeLock.Unlock()
 
 	// Tell all sessions wer're going down
+	// sessions must be locked before access, read is ok here
+	node.sessionLock.RLock()
 	for _, s := range node.sessions {
 		s.kill <- ErrSystemShutdown
 	}
+	node.sessionLock.RUnlock()
 
 	// Clear the map (might not be needed)
+	node.sessionLock.Lock()
 	node.sessions = make(map[string]Session, 0)
+	node.sessionLock.Unlock()
 
 	return nil
 }
@@ -186,7 +192,9 @@ func (n *node) Handshake(client Peer) (Session, error) {
 
 	out.Notice("Session open: %s", string(hello.Realm))
 	sess.Id = welcome.Id
+	n.sessionLock.Lock()
 	n.sessions[string(hello.Realm)] = sess
+	n.sessionLock.Unlock()
 
 	return sess, nil
 }
@@ -201,7 +209,9 @@ func (n *node) SessionClose(sess *Session) {
 
 	n.stats.LogEvent("SessionClose")
 
+	n.sessionLock.Lock()
 	delete(n.sessions, string(sess.pdid))
+	n.sessionLock.Unlock()
 }
 
 func (n *node) LogMessage(msg *Message, sess *Session) {
@@ -331,7 +341,9 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	//
 	// TODO: Remove this code when all agents are authenticated.
 	targetDomain, _ := extractDomain(string(endpoint))
+	n.sessionLock.RLock()
 	targetSession, ok := n.sessions[targetDomain]
+	n.sessionLock.RUnlock()
 	if ok && targetSession.authLevel > sess.authLevel {
 		out.Warning("Communication with authenticated agent %s not permitted", targetSession.pdid)
 		return false
