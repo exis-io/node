@@ -4,6 +4,7 @@ import (
 	// "reflect"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // A Dealer routes and manages RPC calls to callees.
@@ -24,15 +25,15 @@ type Dealer interface {
 }
 
 type RemoteProcedure struct {
-	Endpoint  Sender
-	Procedure URI
+	Endpoint    Sender
+	Procedure   URI
 	PassDetails bool
 }
 
 func NewRemoteProcedure(endpoint Sender, procedure URI, tags []string) RemoteProcedure {
 	proc := RemoteProcedure{
-		Endpoint: endpoint,
-		Procedure: procedure,
+		Endpoint:    endpoint,
+		Procedure:   procedure,
 		PassDetails: false,
 	}
 
@@ -50,6 +51,7 @@ type defaultDealer struct {
 	// map registration IDs to procedures
 	procedures map[ID]RemoteProcedure
 	// map procedure URIs to registration IDs
+	//TODO we may need to mutex around registrations if we had to for sessRegs below
 	registrations map[URI]ID
 
 	// Map InvocationID to RequestID so we can send the RequestID with the
@@ -64,14 +66,15 @@ type defaultDealer struct {
 	// using as a set of registrations (store true for register, delete for
 	// unregister).
 	sessionRegistrations map[Sender]map[URI]bool
+	sessRegLock          sync.RWMutex
 }
 
 func NewDefaultDealer() Dealer {
 	return &defaultDealer{
-		procedures:    make(map[ID]RemoteProcedure),
-		registrations: make(map[URI]ID),
-		requests:      make(map[ID]ID),
-		callers:       make(map[ID]Sender),
+		procedures:           make(map[ID]RemoteProcedure),
+		registrations:        make(map[URI]ID),
+		requests:             make(map[ID]ID),
+		callers:              make(map[ID]Sender),
 		sessionRegistrations: make(map[Sender]map[URI]bool),
 	}
 }
@@ -103,10 +106,12 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
 	d.registrations[endpoint] = reg
 
+	d.sessRegLock.Lock()
 	if d.sessionRegistrations[callee] == nil {
 		d.sessionRegistrations[callee] = make(map[URI]bool)
 	}
 	d.sessionRegistrations[callee][endpoint] = true
+	d.sessRegLock.Unlock()
 
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
@@ -126,7 +131,9 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) {
 			Error:   ErrNoSuchRegistration,
 		})
 	} else {
+		d.sessRegLock.Lock()
 		delete(d.sessionRegistrations[callee], procedure.Procedure)
+		d.sessRegLock.Unlock()
 		delete(d.registrations, procedure.Procedure)
 		delete(d.procedures, msg.Registration)
 		//log.Printf("unregistered procedure %v [%v]", procedure.Procedure, msg.Registration)
@@ -262,13 +269,23 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) {
 func (d *defaultDealer) lostSession(sess *Session) {
 	// TODO: Do something about outstanding requests
 
-	for uri, _ := range(d.sessionRegistrations[sess]) {
+	// Make a copy of the uri's
+	regs := make(map[URI]bool)
+	d.sessRegLock.RLock()
+	for uri, v := range d.sessionRegistrations[sess] {
+		regs[uri] = v
+	}
+	d.sessRegLock.RUnlock()
+
+	for uri, _ := range regs {
 		out.Debug("Unregister: %s", string(uri))
 		delete(d.procedures, d.registrations[uri])
 		delete(d.registrations, uri)
 	}
 
+	d.sessRegLock.Lock()
 	delete(d.sessionRegistrations, sess)
+	d.sessRegLock.Unlock()
 }
 
 func (d *defaultDealer) dump() string {
