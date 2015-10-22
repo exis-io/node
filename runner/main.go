@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	_ "net/http/pprof"
-
 	"github.com/ParadropLabs/node"
 )
 
@@ -18,12 +16,6 @@ var config node.NodeConfig
 func main() {
 	node.Log()
 
-	// Benching code
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	//
 	var configPath = flag.String("configpath", "config.json", "the configuration file for the node")
 	flag.Parse()
 	config, _ := node.LoadConfig(*configPath)
