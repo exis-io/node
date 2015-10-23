@@ -56,6 +56,16 @@ func topLevelDomain(subdomain string) string {
 	return parts[0]
 }
 
+// Pop one level off the domain.
+func popDomain(domain string) string {
+	parts := strings.Split(domain, ".")
+
+    // Pop the last part of the domain.
+    parts = parts[:len(parts)-1]
+
+	return strings.Join(parts, ".")
+}
+
 // Generate list of ancestors up to the top level.
 // If add is not "", it will be appended to each result.
 // A result is not returned if it is equal to the argument domain.

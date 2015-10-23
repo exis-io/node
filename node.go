@@ -92,6 +92,8 @@ func (node *node) Accept(client Peer) error {
 func (node *node) Listen(sess *Session) {
 	c := sess.Receive()
 
+	node.SendJoinNotification(sess)
+
 	limit := node.Config.GetRequestLimit(sess.authid)
 	limiter := NewBasicLimiter(limit)
 	out.Debug("Request rate limit for %s: %d/s", sess, limit)
@@ -201,7 +203,41 @@ func (n *node) SessionClose(sess *Session) {
 
 	n.stats.LogEvent("SessionClose")
 
+	n.SendLeaveNotification(sess)
+
 	delete(n.sessions, string(sess.pdid))
+}
+
+// Publish a notification that a session joined.
+// If "xs.a.b" joins, the message is published to "x.a/sessionJoined".
+func (n *node) SendJoinNotification(sess *Session) {
+	args := []interface{}{}
+	kwargs := map[string]interface{}{
+		"id": sess.Id,
+		"agent": string(sess.pdid),
+	}
+
+	endpoint := popDomain(string(sess.pdid)) + "/sessionJoined"
+	err := n.agent.Publish(endpoint, args, kwargs)
+	if err != nil {
+		out.Critical("Error publishing join notification: %s", err)
+	}
+}
+
+// Publish a notification that a session left.
+// If "xs.a.b" leaves, the message is published to "x.a/sessionLeft".
+func (n *node) SendLeaveNotification(sess *Session) {
+	args := []interface{}{}
+	kwargs := map[string]interface{}{
+		"id": sess.Id,
+		"agent": string(sess.pdid),
+	}
+
+	endpoint := popDomain(string(sess.pdid)) + "/sessionLeft"
+	err := n.agent.Publish(endpoint, args, kwargs)
+	if err != nil {
+		out.Critical("Error publishing leave notification: %s", err)
+	}
 }
 
 func (n *node) LogMessage(msg *Message, sess *Session) {
