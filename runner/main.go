@@ -2,10 +2,11 @@ package main
 
 import (
 	"flag"
-	"github.com/ParadropLabs/node"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/ParadropLabs/node"
 )
 
 // var client *rabric.Client
@@ -15,7 +16,6 @@ var config node.NodeConfig
 func main() {
 	node.Log()
 
-	//
 	var configPath = flag.String("configpath", "config.json", "the configuration file for the node")
 	flag.Parse()
 	config, _ := node.LoadConfig(*configPath)

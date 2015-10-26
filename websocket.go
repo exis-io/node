@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -9,6 +10,7 @@ import (
 
 type websocketPeer struct {
 	conn        *websocket.Conn
+	connLock    sync.Mutex
 	serializer  Serializer
 	messages    chan Message
 	payloadType int
@@ -57,7 +59,10 @@ func (ep *websocketPeer) Send(msg Message) error {
 	if err != nil {
 		return err
 	}
-	return ep.conn.WriteMessage(ep.payloadType, b)
+	ep.connLock.Lock()
+	err = ep.conn.WriteMessage(ep.payloadType, b)
+	ep.connLock.Unlock()
+	return err
 }
 func (ep *websocketPeer) Receive() <-chan Message {
 	return ep.messages
