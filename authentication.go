@@ -144,14 +144,15 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 		return &Welcome{}, nil
 	}
 
+    if r.AuthMode == "soft" {
+        session.authLevel = AUTH_LOW
+        return &Welcome{}, nil
+    }
+
 	_authmethods, ok := hello.Details["authmethods"].([]interface{})
+
 	if !ok {
-		if r.AuthMode == "soft" {
-			session.authLevel = AUTH_LOW
-			return &Welcome{}, nil
-		} else {
-			return nil, fmt.Errorf("could not authenticate with any method")
-		}
+		return nil, fmt.Errorf("could not authenticate with any method")
 	}
 
 	authmethods := []string{}
@@ -189,7 +190,7 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 	}
 
 	// TODO: check default auth (special '*' auth?)
-	return nil, fmt.Errorf("could not authenticate with any method")
+	return nil, fmt.Errorf("could not authenticate with any method. May be missing Details authmethod")
 }
 
 // checkResponse determines whether the response to the challenge is sufficient to gain access to the Realm.
