@@ -47,6 +47,11 @@ func NewNode(config *NodeConfig) Node {
 
 	node.RegisterGetUsage()
 
+	// Open a file for logging messages.
+	if config.MessageLogFile != "" {
+		node.stats.OpenMessageLog(config.MessageLogFile)
+	}
+
 	return node
 }
 
@@ -128,7 +133,13 @@ func (node *node) Listen(sess *Session) {
 
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
-	sess := Session{Peer: client, kill: make(chan URI, 1)}
+	handled := NewHandledMessage("Hello")
+
+	sess := Session{
+		Peer: client,
+		messageCounts: make(map[string]int64),
+		kill: make(chan URI, 1),
+	}
 
 	// Dont accept new sessions if the node is going down
 	if n.closing {
@@ -190,6 +201,11 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	sess.Id = welcome.Id
 	n.sessions[string(hello.Realm)] = sess
 
+	// Note: we are ignoring the CR exchange and just logging it as a
+	// Hello-Welcome exchange.
+	effect := NewMessageEffect("", "Welcome", sess.Id)
+	n.stats.LogMessage(&sess, handled, effect)
+
 	return sess, nil
 }
 
@@ -206,6 +222,12 @@ func (n *node) SessionClose(sess *Session) {
 	n.SendLeaveNotification(sess)
 
 	delete(n.sessions, string(sess.pdid))
+
+	// We log a special _Close message in case there was no Goodbye message
+	// associated with this session closing.
+	handled := NewHandledMessage("_Close")
+	effect := NewMessageEffect("", "", sess.Id)
+	n.stats.LogMessage(sess, handled, effect)
 }
 
 // Publish a notification that a session joined.
@@ -254,7 +276,9 @@ func (n *node) LogMessage(msg *Message, sess *Session) {
 		out.Debug("%s from %s", m.MessageType(), *sess)
 	}
 
-	n.stats.CountMessage(msg)
+	typeName := messageTypeString(*msg)
+	n.stats.LogEvent(typeName)
+	sess.messageCounts[typeName]++
 }
 
 // Handle a new message
@@ -262,6 +286,9 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// NOTE: there is a serious shortcoming here: How do we deal with WAMP messages with an
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
+
+	handled := NewHandledMessage(messageTypeString(*msg))
+	var effect *MessageEffect
 
 	n.LogMessage(msg, sess)
 
@@ -284,6 +311,10 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			}
 
 			sess.Peer.Send(err)
+
+			effect = NewErrorMessageEffect("", ErrInvalidUri, 0)
+			n.stats.LogMessage(sess, handled, effect)
+
 			return
 		}
 
@@ -300,39 +331,44 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			}
 
 			sess.Peer.Send(err)
+
+			effect = NewErrorMessageEffect("", ErrNotAuthorized, 0)
+			n.stats.LogMessage(sess, handled, effect)
+
 			return
 		}
 	}
 
+
 	switch msg := (*msg).(type) {
 	case *Goodbye:
 		logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
+		effect = NewMessageEffect("", "Goodbye", sess.Id)
 		// log.Printf("[%s] leaving: %v", sess, msg.Reason)
-		return
 
 	// Broker messages
 	case *Publish:
-		n.Broker.Publish(sess, msg)
+		effect = n.Broker.Publish(sess, msg)
 	case *Subscribe:
-		n.Broker.Subscribe(sess, msg)
+		effect = n.Broker.Subscribe(sess, msg)
 	case *Unsubscribe:
-		n.Broker.Unsubscribe(sess, msg)
+		effect = n.Broker.Unsubscribe(sess, msg)
 
 	// Dealer messages
 	case *Register:
-		n.Dealer.Register(sess, msg)
+		effect = n.Dealer.Register(sess, msg)
 	case *Unregister:
-		n.Dealer.Unregister(sess, msg)
+		effect = n.Dealer.Unregister(sess, msg)
 	case *Call:
-		n.Dealer.Call(sess, msg)
+		effect = n.Dealer.Call(sess, msg)
 	case *Yield:
-		n.Dealer.Yield(sess, msg)
+		effect = n.Dealer.Yield(sess, msg)
 
 	// Error messages
 	case *Error:
 		if msg.Type == INVOCATION {
 			// the only type of ERROR message the Node should receive
-			n.Dealer.Error(sess, msg)
+			effect = n.Dealer.Error(sess, msg)
 		} else {
 			out.Critical("invalid ERROR message received: %v", msg)
 		}
@@ -340,6 +376,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	default:
 		out.Critical("Unhandled message:", msg.MessageType())
 	}
+
+	n.stats.LogMessage(sess, handled, effect)
 }
 
 // Return true or false based on the message and the session which sent the message

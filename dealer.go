@@ -9,15 +9,15 @@ import (
 // A Dealer routes and manages RPC calls to callees.
 type Dealer interface {
 	// Register a procedure on an endpoint
-	Register(Sender, *Register)
+	Register(Sender, *Register) *MessageEffect
 	// Unregister a procedure on an endpoint
-	Unregister(Sender, *Unregister)
+	Unregister(Sender, *Unregister) *MessageEffect
 	// Call a procedure on an endpoint
-	Call(Sender, *Call)
+	Call(Sender, *Call) *MessageEffect
 	// Return the result of a procedure call
-	Yield(Sender, *Yield)
+	Yield(Sender, *Yield) *MessageEffect
 	// Handle an ERROR message from an invocation
-	Error(Sender, *Error)
+	Error(Sender, *Error) *MessageEffect
 	dump() string
 	hasRegistration(string) bool
 	lostSession(*Session)
@@ -27,6 +27,12 @@ type RemoteProcedure struct {
 	Endpoint  Sender
 	Procedure URI
 	PassDetails bool
+}
+
+type OutstandingRequest struct {
+	request   ID
+	procedure URI
+	caller    Sender
 }
 
 func NewRemoteProcedure(endpoint Sender, procedure URI, tags []string) RemoteProcedure {
@@ -54,10 +60,7 @@ type defaultDealer struct {
 
 	// Map InvocationID to RequestID so we can send the RequestID with the
 	// result (lets caller know what request the result is for).
-	requests map[ID]ID
-
-	// Map InvocationID to Sender so we know where to send the response.
-	callers map[ID]Sender
+	requests map[ID]OutstandingRequest
 
 	// Keep track of registrations by session, so that we can clean up when the
 	// session closes.  For each session, we have a map[URI]bool, which we are
@@ -70,13 +73,12 @@ func NewDefaultDealer() Dealer {
 	return &defaultDealer{
 		procedures:    make(map[ID]RemoteProcedure),
 		registrations: make(map[URI]ID),
-		requests:      make(map[ID]ID),
-		callers:       make(map[ID]Sender),
+		requests:      make(map[ID]OutstandingRequest),
 		sessionRegistrations: make(map[Sender]map[URI]bool),
 	}
 }
 
-func (d *defaultDealer) Register(callee Sender, msg *Register) {
+func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 	// Endpoint may contain a # sign to pass comma-separated tags.
 	// Example: pd.agent/function#details
 	parts := strings.SplitN(string(msg.Procedure), "#", 2)
@@ -96,7 +98,7 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 			Details: make(map[string]interface{}),
 			Error:   ErrProcedureAlreadyExists,
 		})
-		return
+		return NewErrorMessageEffect(endpoint, ErrProcedureAlreadyExists, 0)
 	}
 
 	reg := NewID()
@@ -113,9 +115,11 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) {
 		Request:      msg.Request,
 		Registration: reg,
 	})
+
+	return NewMessageEffect(endpoint, "Registered", reg)
 }
 
-func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) {
+func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffect {
 	if procedure, ok := d.procedures[msg.Registration]; !ok {
 		// the registration doesn't exist
 		//log.Println("error: no such registration:", msg.Registration)
@@ -125,6 +129,7 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) {
 			Details: make(map[string]interface{}),
 			Error:   ErrNoSuchRegistration,
 		})
+		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Registration)
 	} else {
 		delete(d.sessionRegistrations[callee], procedure.Procedure)
 		delete(d.registrations, procedure.Procedure)
@@ -133,10 +138,11 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) {
 		callee.Send(&Unregistered{
 			Request: msg.Request,
 		})
+		return NewMessageEffect(procedure.Procedure, "Unregistered", msg.Registration)
 	}
 }
 
-func (d *defaultDealer) Call(caller Sender, msg *Call) {
+func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 	if reg, ok := d.registrations[msg.Procedure]; !ok {
 		caller.Send(&Error{
 			Type:    msg.MessageType(),
@@ -144,6 +150,7 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 			Details: make(map[string]interface{}),
 			Error:   ErrNoSuchProcedure,
 		})
+		return NewErrorMessageEffect(msg.Procedure, ErrNoSuchProcedure, 0)
 	} else {
 		if rproc, ok := d.procedures[reg]; !ok {
 			// found a registration id, but doesn't match any remote procedure
@@ -152,8 +159,9 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 				Request: msg.Request,
 				Details: make(map[string]interface{}),
 				// TODO: what should this error be?
-				Error: URI("wamp.error.internal_error"),
+				Error: ErrInternalError,
 			})
+			return NewErrorMessageEffect(msg.Procedure, ErrInternalError, 0)
 		} else {
 			// everything checks out, make the invocation request
 			args := msg.Arguments
@@ -190,8 +198,11 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 			}
 
 			invocationID := NewID()
-			d.requests[invocationID] = msg.Request
-			d.callers[invocationID] = caller
+			d.requests[invocationID] = OutstandingRequest{
+				request: msg.Request,
+				procedure: msg.Procedure,
+				caller: caller,
+			}
 
 			rproc.Endpoint.Send(&Invocation{
 				Request:      invocationID,
@@ -200,62 +211,53 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) {
 				Arguments:    args,
 				ArgumentsKw:  kwargs,
 			})
+			return NewMessageEffect(msg.Procedure, "", invocationID)
 		}
 	}
 }
 
-func (d *defaultDealer) Yield(callee Sender, msg *Yield) {
-	caller, ok := d.callers[msg.Request]
+func (d *defaultDealer) Yield(callee Sender, msg *Yield) *MessageEffect {
+	request, ok := d.requests[msg.Request]
 	if !ok {
 		// WAMP spec doesn't allow sending an error in response to a YIELD message
 		//log.Println("received YIELD message with invalid invocation request ID:", msg.Request)
-		return
-	}
-
-	delete(d.callers, msg.Request)
-
-	requestId, ok := d.requests[msg.Request]
-	if !ok {
-		return
+		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Request)
 	}
 
 	delete(d.requests, msg.Request)
 
 	// return the result to the caller
-	caller.Send(&Result{
-		Request:     requestId,
+	request.caller.Send(&Result{
+		Request:     request.request,
 		Details:     map[string]interface{}{},
 		Arguments:   msg.Arguments,
 		ArgumentsKw: msg.ArgumentsKw,
 	})
+
+	return NewMessageEffect(request.procedure, "Result", msg.Request)
 }
 
-func (d *defaultDealer) Error(peer Sender, msg *Error) {
-	caller, ok := d.callers[msg.Request]
+func (d *defaultDealer) Error(peer Sender, msg *Error) *MessageEffect {
+	request, ok := d.requests[msg.Request]
 	if !ok {
-		//log.Println("received ERROR (INVOCATION) message with invalid invocation request ID:", msg.Request)
-		return
-	}
-
-	delete(d.callers, msg.Request)
-
-	requestId, ok := d.requests[msg.Request]
-	if !ok {
-		//log.Printf("received ERROR (INVOCATION) message, but unable to match it (%v) to a CALL ID", msg.Request)
-		return
+		// WAMP spec doesn't allow sending an error in response to a YIELD message
+		//log.Println("received YIELD message with invalid invocation request ID:", msg.Request)
+		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Request)
 	}
 
 	delete(d.requests, msg.Request)
 
 	// return an error to the caller
-	caller.Send(&Error{
+	request.caller.Send(&Error{
 		Type:        CALL,
-		Request:     requestId,
+		Request:     request.request,
 		Details:     make(map[string]interface{}),
 		Arguments:   msg.Arguments,
 		ArgumentsKw: msg.ArgumentsKw,
 		Error:       msg.Error,
 	})
+
+	return NewErrorMessageEffect(request.procedure, msg.Error, msg.Request)
 }
 
 // Remove all the registrations for a session that has disconected
@@ -284,17 +286,11 @@ func (d *defaultDealer) dump() string {
 		ret += "\n\t" + string(k) + ": " + strconv.FormatUint(uint64(v), 16)
 	}
 
-	ret += "\n  callers:"
-
-	for k, _ := range d.callers {
-		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": (sender)"
-	}
-
-	ret += "\n  requests:"
-
-	for k, v := range d.requests {
-		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
-	}
+//	ret += "\n  requests:"
+//
+//	for k, v := range d.requests {
+//		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
+//	}
 
 	return ret
 }

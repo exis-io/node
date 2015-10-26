@@ -85,4 +85,7 @@ const (
 	// but the Role configured does not exists - hence there is some
 	// misconfiguration in the Node.
 	ErrNoSuchRole = URI("wamp.error.no_such_role")
+
+	// Internal node error.  Hopefully, we do not see many of these.
+	ErrInternalError = URI("wamp.error.internal_error")
 )

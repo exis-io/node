@@ -27,6 +27,8 @@ type Session struct {
 	// TODO: Remove once authentication is enabled for all agents.
 	authLevel int
 
+	messageCounts map[string]int64
+
 	kill chan URI
 }
 

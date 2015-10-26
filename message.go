@@ -1,5 +1,10 @@
 package node
 
+import (
+	"reflect"
+	"time"
+)
+
 // Message is a generic container for a WAMP message.
 type Message interface {
 	MessageType() MessageType
@@ -466,6 +471,50 @@ func (msg *Interrupt) MessageType() MessageType {
 	return INTERRUPT
 }
 
+type HandledMessage struct {
+	Time   time.Time
+	Type   string
+}
+
+func NewHandledMessage(mtype string) *HandledMessage {
+	return &HandledMessage{
+		Time: time.Now(),
+		Type: mtype,
+	}
+}
+
+// MessageResult provides a way for broker and dealer to return the outcome of
+// the processed message.  What target did it hit, and what kind of response
+// was sent back?
+//
+// InternalID links related messages over time:
+// Subscribe <-> Unsubscribe (by subscription ID)
+// Register <-> Unregister (by registration ID)
+// Call <-> Invocation <-> Yield/Error <-> Result/Error (by invocation ID)
+type MessageEffect struct {
+	Endpoint   string
+	Response   string
+	InternalID ID
+	Error      string
+}
+
+func NewMessageEffect(endpoint URI, response string, internalID ID) *MessageEffect {
+	return &MessageEffect{
+		Endpoint: string(endpoint),
+		Response: response,
+		InternalID: internalID,
+	}
+}
+
+func NewErrorMessageEffect(endpoint URI, err URI, internalID ID) *MessageEffect {
+	return &MessageEffect{
+		Endpoint: string(endpoint),
+		Response: "Error",
+		InternalID: internalID,
+		Error: string(err),
+	}
+}
+
 ////////////////////////////////////////
 /*
  Begin a whole mess of code we really don't want to get into
@@ -510,15 +559,46 @@ func destination(m *Message) (URI, error) {
 // Given a message, return the request ID
 func requestID(m *Message) ID {
 	switch msg := (*m).(type) {
+	case *Error:
+		return msg.Request
 	case *Publish:
+		return msg.Request
+	case *Published:
 		return msg.Request
 	case *Subscribe:
 		return msg.Request
-	case *Register:
+	case *Subscribed:
+		return msg.Request
+	case *Unsubscribe:
+		return msg.Request
+	case *Unsubscribed:
 		return msg.Request
 	case *Call:
+		return msg.Request
+	case *Result:
+		return msg.Request
+	case *Register:
+		return msg.Request
+	case *Registered:
+		return msg.Request
+	case *Unregister:
+		return msg.Request
+	case *Unregistered:
+		return msg.Request
+	case *Invocation:
+		return msg.Request
+	case *Yield:
+		return msg.Request
+	case *Cancel:
+		return msg.Request
+	case *Interrupt:
 		return msg.Request
 	}
 
 	return ID(0)
+}
+
+// Get the string representing the message type.
+func messageTypeString(msg Message) string {
+	return reflect.TypeOf(msg).Elem().Name()
 }

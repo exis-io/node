@@ -6,5 +6,6 @@
         ["xs", 100],
         ["", 10]
     ],
-    "Bouncer": "xs.demo.bouncer"
+    "Bouncer": "xs.demo.bouncer",
+    "MessageLogFile": "messages.log"
 }

@@ -8,11 +8,11 @@ import (
 // A broker handles routing EVENTS from Publishers to Subscribers.
 type Broker interface {
 	// Publishes a message to all Subscribers.
-	Publish(Sender, *Publish)
+	Publish(Sender, *Publish) *MessageEffect
 	// Subscribes to messages on a URI.
-	Subscribe(Sender, *Subscribe)
+	Subscribe(Sender, *Subscribe) *MessageEffect
 	// Unsubscribes from messages on a URI.
-	Unsubscribe(Sender, *Unsubscribe)
+	Unsubscribe(Sender, *Unsubscribe) *MessageEffect
 	dump() string
 	hasSubscription(string) bool
 	lostSession(*Session)
@@ -44,7 +44,7 @@ func NewDefaultBroker() Broker {
 //
 // If msg.Options["acknowledge"] == true, the publisher receives a Published event
 // after the message has been sent to all subscribers.
-func (br *defaultBroker) Publish(pub Sender, msg *Publish) {
+func (br *defaultBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 	pubId := NewID()
 
 	evtTemplate := Event{
@@ -73,14 +73,19 @@ func (br *defaultBroker) Publish(pub Sender, msg *Publish) {
 		sub.Send(&event)
 	}
 
+	result := NewMessageEffect(msg.Topic, "", pubId)
+
 	// only send published message if acknowledge is present and set to true
 	if doPub, _ := msg.Options["acknowledge"].(bool); doPub {
+		result.Response = "Published"
 		pub.Send(&Published{Request: msg.Request, Publication: pubId})
 	}
+
+	return result
 }
 
 // Subscribe subscribes the client to the given topic.
-func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
+func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) *MessageEffect {
 	br.subMutex.Lock()
 
 	if _, ok := br.routes[msg.Topic]; !ok {
@@ -98,9 +103,11 @@ func (br *defaultBroker) Subscribe(sub Sender, msg *Subscribe) {
 	br.subMutex.Unlock()
 
 	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
+
+	return NewMessageEffect(msg.Topic, "Subscribed", id)
 }
 
-func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
+func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) *MessageEffect {
 	br.subMutex.Lock()
 
 	topic, ok := br.subscriptions[sub][msg.Subscription]
@@ -114,7 +121,8 @@ func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
 		}
 		sub.Send(err)
 		//log.Printf("Error unsubscribing: no such subscription %v", msg.Subscription)
-		return
+
+		return NewErrorMessageEffect("", ErrNoSuchSubscription, msg.Subscription)
 	}
 
 	delete(br.subscriptions[sub], msg.Subscription)
@@ -133,6 +141,8 @@ func (br *defaultBroker) Unsubscribe(sub Sender, msg *Unsubscribe) {
 	br.subMutex.Unlock()
 
 	sub.Send(&Unsubscribed{Request: msg.Request})
+
+	return NewMessageEffect(topic, "Unsubscribed", msg.Subscription)
 }
 
 // Remove all the subs for a session that has disconected

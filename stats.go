@@ -1,7 +1,8 @@
 package node
 
 import (
-	"reflect"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -11,6 +12,7 @@ type NodeStats struct {
 	lock          sync.Mutex
 	messages      chan string
 	messageCounts map[string]int64
+	messageLog    *os.File
 }
 
 func NewNodeStats() *NodeStats {
@@ -34,7 +36,7 @@ func (stats *NodeStats) CountEventsRoutine() {
 // CountMessage puts a message on the queue for consumption by CountEventsRoutine.
 // We are just using reflection here to log different message types.
 func (stats *NodeStats) CountMessage(msg *Message) {
-	typeName := reflect.TypeOf(*msg).Elem().Name()
+	typeName := messageTypeString(*msg)
 	stats.messages <- typeName
 }
 
@@ -42,6 +44,30 @@ func (stats *NodeStats) CountMessage(msg *Message) {
 // We are counting the occurences of each unique string.
 func (stats *NodeStats) LogEvent(msg string) {
 	stats.messages <- msg
+}
+
+func (stats *NodeStats) OpenMessageLog(path string) error {
+	var err error
+	stats.messageLog, err = os.Create(path)
+	if err == nil {
+		stats.messageLog.WriteString("time,type,authid,agent,endpoint,exchange,response,error\n")
+	}
+	return err
+}
+
+func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *MessageEffect) {
+	if stats.messageLog != nil {
+		event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s\n",
+				msg.Time.Unix(), msg.Time.Nanosecond(),
+				msg.Type,
+				sess.authid,
+				sess.pdid,
+				effect.Endpoint,
+				effect.InternalID,
+				effect.Response,
+				effect.Error)
+		stats.messageLog.WriteString(event)
+	}
 }
 
 // Register the getUsage method on the node's internal agent.
