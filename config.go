@@ -8,6 +8,7 @@ import (
 type NodeConfig struct {
 	Agent string
 	RequestLimits [][]interface{}
+	Bouncer string
 }
 
 func LoadConfig(path string) (*NodeConfig, error) {

@@ -5,5 +5,6 @@
         ["xs.node", 1000],
         ["xs", 100],
         ["", 10]
-    ]
+    ],
+    "Bouncer": "xs.demo.bouncer"
 }
