@@ -13,6 +13,19 @@ type Message interface {
 
 type MessageType int
 
+// Verb associated with a message.
+// Example: for a REGISTER message, an agent needs to have permission for verb "r".
+var messageVerb = map[MessageType]string{
+	ERROR: "r",
+	PUBLISH: "p",
+	SUBSCRIBE: "s",
+	UNSUBSCRIBE: "s",
+	CALL: "c",
+	CANCEL: "c",
+	REGISTER: "r",
+	UNREGISTER: "r",
+}
+
 func (mt MessageType) New() Message {
 	switch mt {
 	case HELLO:
@@ -601,4 +614,9 @@ func requestID(m *Message) ID {
 // Get the string representing the message type.
 func messageTypeString(msg Message) string {
 	return reflect.TypeOf(msg).Elem().Name()
+}
+
+func GetMessageVerb(msg Message) (string, bool) {
+	verb, ok := messageVerb[msg.MessageType()]
+	return verb, ok
 }

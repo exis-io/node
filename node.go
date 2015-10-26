@@ -302,6 +302,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 
 	n.LogMessage(msg, sess)
 
+
 	// Extract the target domain from the message
 	target, err := destination(msg)
 	if err == nil {
@@ -328,8 +329,10 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			return
 		}
 
+		verb, ok := GetMessageVerb(*msg)
+
 		// Downward domain action? That is, endpoint is a subdomain of the current agent?
-		if !n.Permitted(target, sess) {
+		if !ok || !n.Permitted(target, sess, verb) {
 			out.Warning("Action not allowed: %s:%s", sess.pdid, target)
 
 			m := *msg
@@ -391,7 +394,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 }
 
 // Return true or false based on the message and the session which sent the message
-func (n *node) Permitted(endpoint URI, sess *Session) bool {
+func (n *node) Permitted(endpoint URI, sess *Session, verb string) bool {
 	// Permissions checking is turned off---only for testing, please!
 	if n.PermMode == "off" {
 		return true
@@ -426,13 +429,13 @@ func (n *node) Permitted(endpoint URI, sess *Session) bool {
 	// TODO Check permissions cache: if found, allow
 	// TODO: save a permitted action in some flavor of cache
 
-	return n.AskBouncer(string(sess.authid), string(endpoint))
+	return n.AskBouncer(string(sess.authid), string(endpoint), verb)
 
 	// No bouncer approved it.
 	return false
 }
 
-func (n *node) AskBouncer(authid string, target string) bool {
+func (n *node) AskBouncer(authid string, target string, verb string) bool {
 	// Check with bouncer(s) on permissions check.
 	// At least one bouncer needs to approve a non-downward action.
 
@@ -448,7 +451,7 @@ func (n *node) AskBouncer(authid string, target string) bool {
 		return false
 	}
 
-	args := []interface{}{authid, target}
+	args := []interface{}{authid, target, verb}
 	ret, err := n.agent.Call(checkPerm, args, nil)
 	if err != nil {
 		out.Critical("Error, returning false: %s", err)
