@@ -43,15 +43,16 @@ func NewNode(config *NodeConfig) Node {
 		Config:   config,
 	}
 
+	// Open a file for logging messages.
+	// Note: this must come before we set up the local agent.
+	if config.MessageLogFile != "" {
+		node.stats.OpenMessageLog(config.MessageLogFile)
+	}
+
 	node.agent = node.localClient(config.Agent)
 	node.Authen = NewAuthen(node)
 
 	node.RegisterGetUsage()
-
-	// Open a file for logging messages.
-	if config.MessageLogFile != "" {
-		node.stats.OpenMessageLog(config.MessageLogFile)
-	}
 
 	return node
 }
@@ -250,10 +251,16 @@ func (n *node) SendJoinNotification(sess *Session) {
 	}
 
 	endpoint := popDomain(string(sess.pdid)) + "/sessionJoined"
-	err := n.agent.Publish(endpoint, args, kwargs)
-	if err != nil {
-		out.Critical("Error publishing join notification: %s", err)
+
+	// Note: we are not using the agent to publish these messages because the
+	// agent itself triggers a sessionJoined message.
+	msg := &Publish{
+		Request: NewID(),
+		Topic: URI(endpoint),
+		Arguments: args,
+		ArgumentsKw: kwargs,
 	}
+	n.Broker.Publish(nil, msg)
 }
 
 // Publish a notification that a session left.
@@ -266,10 +273,14 @@ func (n *node) SendLeaveNotification(sess *Session) {
 	}
 
 	endpoint := popDomain(string(sess.pdid)) + "/sessionLeft"
-	err := n.agent.Publish(endpoint, args, kwargs)
-	if err != nil {
-		out.Critical("Error publishing leave notification: %s", err)
+
+	msg := &Publish{
+		Request: NewID(),
+		Topic: URI(endpoint),
+		Arguments: args,
+		ArgumentsKw: kwargs,
 	}
+	n.Broker.Publish(nil, msg)
 }
 
 func (n *node) LogMessage(msg *Message, sess *Session) {
