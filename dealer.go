@@ -19,8 +19,12 @@ type Dealer interface {
 	Yield(Sender, *Yield) *MessageEffect
 	// Handle an ERROR message from an invocation
 	Error(Sender, *Error) *MessageEffect
+
+	// Timeout any calls that were waiting for registrations.
+	ClearBlockedCalls()
+
 	dump() string
-	hasRegistration(string) bool
+	hasRegistration(URI) bool
 	lostSession(*Session)
 }
 
@@ -69,6 +73,17 @@ type defaultDealer struct {
 	// using as a set of registrations (store true for register, delete for
 	// unregister).
 	sessionRegistrations map[Sender]map[URI]bool
+
+	// waitForRegistration specifies how to treat calls for procedures that do
+	// not exist.  If false, we send back an error immediately.  If true, we
+	// queue the call and block until the appropriate registration comes in.
+	//
+	// This is intended to solve out-of-order connections of core appliances
+	// during the startup phase on the node.
+	blockedCalls         map[URI][]chan bool
+	waitForRegistration  bool
+	blockedCallsMutex    sync.Mutex
+
 	sessRegLock          sync.RWMutex
 }
 
@@ -78,6 +93,8 @@ func NewDefaultDealer() Dealer {
 		registrations:        make(map[URI]ID),
 		requests:             make(map[ID]OutstandingRequest),
 		sessionRegistrations: make(map[Sender]map[URI]bool),
+		blockedCalls:         make(map[URI][]chan bool),
+		waitForRegistration:  true,
 	}
 }
 
@@ -105,14 +122,22 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 	}
 
 	reg := NewID()
+
+	d.sessRegLock.Lock()
+
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
 	d.registrations[endpoint] = reg
 
-	d.sessRegLock.Lock()
 	if d.sessionRegistrations[callee] == nil {
 		d.sessionRegistrations[callee] = make(map[URI]bool)
 	}
 	d.sessionRegistrations[callee][endpoint] = true
+
+	for _, waiting := range d.blockedCalls[endpoint] {
+		waiting <- true
+	}
+	delete(d.blockedCalls, endpoint)
+
 	d.sessRegLock.Unlock()
 
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
@@ -150,6 +175,19 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 }
 
 func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
+	d.sessRegLock.RLock()
+	defer d.sessRegLock.RUnlock()
+
+	if !d.hasRegistration(msg.Procedure) && d.waitForRegistration {
+		ready := make(chan bool)
+		d.blockedCalls[msg.Procedure] = append(d.blockedCalls[msg.Procedure], ready)
+
+		// Unlock while we block on the channel.
+		d.sessRegLock.RUnlock()
+		<-ready
+		d.sessRegLock.RLock()
+	}
+
 	if reg, ok := d.registrations[msg.Procedure]; !ok {
 		caller.Send(&Error{
 			Type:    msg.MessageType(),
@@ -267,6 +305,20 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) *MessageEffect {
 	return NewErrorMessageEffect(request.procedure, msg.Error, msg.Request)
 }
 
+func (d *defaultDealer) ClearBlockedCalls() {
+	d.sessRegLock.Lock()
+	defer d.sessRegLock.Unlock()
+
+	d.waitForRegistration = false
+
+	for procedure, callers := range d.blockedCalls {
+		for _, caller := range callers {
+			caller <- true
+		}
+		delete(d.blockedCalls, procedure)
+	}
+}
+
 // Remove all the registrations for a session that has disconected
 func (d *defaultDealer) lostSession(sess *Session) {
 	// TODO: Do something about outstanding requests
@@ -313,7 +365,10 @@ func (d *defaultDealer) dump() string {
 }
 
 // Testing. Not sure if this works 100 or not
-func (d *defaultDealer) hasRegistration(s string) bool {
-	_, exists := d.registrations[URI(s)]
+func (d *defaultDealer) hasRegistration(s URI) bool {
+	d.sessRegLock.RLock()
+	defer d.sessRegLock.RUnlock()
+
+	_, exists := d.registrations[s]
 	return exists
 }

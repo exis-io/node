@@ -6,10 +6,11 @@ import (
 )
 
 type NodeConfig struct {
-	Agent string
-	RequestLimits [][]interface{}
-	Bouncer string
+	Agent          string
+	RequestLimits  [][]interface{}
+	Bouncer        string
 	MessageLogFile string
+	HoldCalls      int
 }
 
 func LoadConfig(path string) (*NodeConfig, error) {

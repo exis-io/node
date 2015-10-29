@@ -49,6 +49,13 @@ func NewNode(config *NodeConfig) Node {
 		node.stats.OpenMessageLog(config.MessageLogFile)
 	}
 
+	if config.HoldCalls > 0 {
+		go func() {
+			time.Sleep(time.Duration(config.HoldCalls) * time.Second)
+			node.Dealer.ClearBlockedCalls()
+		}()
+	}
+
 	node.agent = node.localClient(config.Agent)
 	node.Authen = NewAuthen(node)
 
@@ -456,7 +463,7 @@ func (n *node) AskBouncer(authid string, target string, verb string) bool {
 
 	checkPerm := n.Config.Bouncer + "/checkPerm"
 
-	bouncerActive := n.Dealer.hasRegistration(checkPerm)
+	bouncerActive := n.Dealer.hasRegistration(URI(checkPerm))
 	if !bouncerActive {
 		out.Warning("Bouncer (%s) not registered", checkPerm)
 		return false

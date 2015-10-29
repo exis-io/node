@@ -7,5 +7,6 @@
         ["", 10]
     ],
     "Bouncer": "xs.demo.bouncer",
-    "MessageLogFile": "messages.log"
+    "MessageLogFile": "messages.log",
+    "HoldCalls": 300
 }
