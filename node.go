@@ -46,9 +46,10 @@ func NewNode(config *NodeConfig) Node {
 	// Open a file for logging messages.
 	// Note: this must come before we set up the local agent.
 	if config.MessageLogFile != "" {
-		node.stats.OpenMessageLog(config.MessageLogFile)
+		node.stats.OpenMessageLog(config.MessageLogFile, config.MessageLogMaxLines)
 	}
 
+	// For the startup phase, we will hold calls without a registered procedure.
 	if config.HoldCalls > 0 {
 		go func() {
 			time.Sleep(time.Duration(config.HoldCalls) * time.Second)

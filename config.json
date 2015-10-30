@@ -8,5 +8,6 @@
     ],
     "Bouncer": "xs.demo.bouncer",
     "MessageLogFile": "messages.log",
+    "MessageLogMaxLines": 12500,
     "HoldCalls": 300
 }
