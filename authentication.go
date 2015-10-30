@@ -37,8 +37,11 @@ func NewAuthen(node *node) Authen {
 		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
-	authen.CRAuthenticators["token"] = NewTokenAuthenticator(node.agent)
-	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node.agent)
+	agent := node.agent
+	authName := node.Config.AuthName
+
+	authen.CRAuthenticators["token"] = NewTokenAuthenticator(agent, authName)
+	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(agent, authName)
 
 	return authen
 }
@@ -268,7 +271,8 @@ type Authenticator interface {
 //
 
 type TokenAuthenticator struct {
-	agent *Client
+	agent    *Client
+	authName string
 }
 
 func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
@@ -278,7 +282,7 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
 
-	for _, auth := range ancestorDomains(authid, "auth") {
+	for _, auth := range ancestorDomains(authid, ta.authName) {
 		out.Debug("Verifying token for %s with %s", authid, auth)
 
 		authEndpoint := auth + "/check_token_1"
@@ -299,9 +303,10 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 	return nil, fmt.Errorf("Unable to verify token with auth")
 }
 
-func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
+func NewTokenAuthenticator(agent *Client, authName string) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
 		agent: agent,
+		authName: authName,
 	}
 	return authenticator
 }
@@ -320,7 +325,8 @@ func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
 //
 
 type SignatureAuthenticator struct {
-	agent *Client
+	agent    *Client
+	authName string
 }
 
 func (ta *SignatureAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
@@ -364,7 +370,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
-		for _, auth := range ancestorDomains(authid, "auth") {
+		for _, auth := range ancestorDomains(authid, ta.authName) {
 			out.Debug("Asking %s for public key of %s", auth, authid)
 
 			authEndpoint := auth + "/get_appliance_key"
@@ -398,9 +404,10 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	return nil, nil
 }
 
-func NewSignatureAuthenticator(agent *Client) *SignatureAuthenticator {
+func NewSignatureAuthenticator(agent *Client, authName string) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
 		agent: agent,
+		authName: authName,
 	}
 	return authenticator
 }
