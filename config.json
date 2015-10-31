@@ -6,7 +6,7 @@
         ["xs", 100],
         ["", 10]
     ],
-    "AuthName": "auth",
+    "AuthName": "Auth",
     "Bouncer": "xs.demo.bouncer",
     "MessageLogFile": "messages.log",
     "MessageLogMaxLines": 12500,
