@@ -58,15 +58,15 @@ func NewRemoteProcedure(endpoint Sender, procedure URI, tags []string) RemotePro
 }
 
 type defaultDealer struct {
+	//
+	// Registrations
+	//
+
 	// map registration IDs to procedures
 	procedures map[ID]RemoteProcedure
-	// map procedure URIs to registration IDs
-	//TODO we may need to mutex around registrations if we had to for sessRegs below
-	registrations map[URI]ID
 
-	// Map InvocationID to RequestID so we can send the RequestID with the
-	// result (lets caller know what request the result is for).
-	requests map[ID]OutstandingRequest
+	// map procedure URIs to registration IDs
+	registrations map[URI]ID
 
 	// Keep track of registrations by session, so that we can clean up when the
 	// session closes.  For each session, we have a map[URI]bool, which we are
@@ -80,11 +80,31 @@ type defaultDealer struct {
 	//
 	// This is intended to solve out-of-order connections of core appliances
 	// during the startup phase on the node.
-	blockedCalls        map[URI][]chan bool
+	//
+	// This is lumped in with the registrations fields because it makes sense
+	// to read this flag with the registrationMutex read lock held.  We check
+	// this flag at the same time as checking whether a registration exists.
 	waitForRegistration bool
-	blockedCallsMutex   sync.Mutex
 
-	sessRegLock sync.RWMutex
+	// Protect procedures and registrations maps.  Assume there will be more
+	// reads than writes (agents making calls vs.  registrations).
+	registrationMutex sync.RWMutex
+
+	//
+	// Requests
+	//
+
+	// Map InvocationID to RequestID so we can send the RequestID with the
+	// result (lets caller know what request the result is for).
+	requests map[ID]OutstandingRequest
+
+	// Map procedure URIs to lists of channels that are blocked waiting for
+	// registrations on those URIs.  See the comment for the
+	// waitForRegistration flag.
+	blockedCalls        map[URI][]chan bool
+
+	// Protect requests and blockedCalls maps.
+	requestMutex        sync.Mutex
 }
 
 func NewDefaultDealer() Dealer {
@@ -109,9 +129,11 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 		tags = strings.Split(parts[1], ",")
 	}
 
-	d.sessRegLock.RLock()
+	d.registrationMutex.Lock()
 	if id, ok := d.registrations[endpoint]; ok {
-		defer d.sessRegLock.RUnlock()
+		// Unlock before calling Send.
+		d.registrationMutex.Unlock()
+
 		//log.Println("error: procedure already exists:", msg.Procedure, id)
 		out.Error("error: procedure already exists:", endpoint, id)
 		callee.Send(&Error{
@@ -122,11 +144,8 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 		})
 		return NewErrorMessageEffect(endpoint, ErrProcedureAlreadyExists, 0)
 	}
-	d.sessRegLock.RUnlock()
 
 	reg := NewID()
-
-	d.sessRegLock.Lock()
 
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
 	d.registrations[endpoint] = reg
@@ -141,7 +160,7 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 	}
 	delete(d.blockedCalls, endpoint)
 
-	d.sessRegLock.Unlock()
+	d.registrationMutex.Unlock()
 
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
@@ -153,9 +172,10 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 }
 
 func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffect {
-	d.sessRegLock.RLock()
+	d.registrationMutex.Lock()
 	if procedure, ok := d.procedures[msg.Registration]; !ok {
-		defer d.sessRegLock.RUnlock()
+		d.registrationMutex.Unlock()
+
 		// the registration doesn't exist
 		//log.Println("error: no such registration:", msg.Registration)
 		callee.Send(&Error{
@@ -166,12 +186,12 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 		})
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Registration)
 	} else {
-		d.sessRegLock.RUnlock()
-		d.sessRegLock.Lock()
 		delete(d.sessionRegistrations[callee], procedure.Procedure)
 		delete(d.registrations, procedure.Procedure)
 		delete(d.procedures, msg.Registration)
-		d.sessRegLock.Unlock()
+
+		d.registrationMutex.Unlock()
+
 		//log.Printf("unregistered procedure %v [%v]", procedure.Procedure, msg.Registration)
 		callee.Send(&Unregistered{
 			Request: msg.Request,
@@ -180,21 +200,30 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 	}
 }
 
-func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
-	d.sessRegLock.RLock()
-	defer d.sessRegLock.RUnlock()
+// Call with registrationMutex read lock held.
+func (d *defaultDealer) shouldHoldCall(procedure URI) bool {
+	_, exists := d.registrations[procedure]
+	return (!exists && d.waitForRegistration)
+}
 
-	if !d.hasRegistration(msg.Procedure) && d.waitForRegistration {
+func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
+	d.registrationMutex.RLock()
+
+	if d.shouldHoldCall(msg.Procedure) {
 		ready := make(chan bool)
+
+		d.requestMutex.Lock()
 		d.blockedCalls[msg.Procedure] = append(d.blockedCalls[msg.Procedure], ready)
+		d.requestMutex.Unlock()
 
 		// Unlock while we block on the channel.
-		d.sessRegLock.RUnlock()
+		d.registrationMutex.RUnlock()
 		<-ready
-		d.sessRegLock.RLock()
+		d.registrationMutex.RLock()
 	}
 
 	if reg, ok := d.registrations[msg.Procedure]; !ok {
+		d.registrationMutex.RUnlock()
 		caller.Send(&Error{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
@@ -204,6 +233,7 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 		return NewErrorMessageEffect(msg.Procedure, ErrNoSuchProcedure, 0)
 	} else {
 		if rproc, ok := d.procedures[reg]; !ok {
+			d.registrationMutex.RUnlock()
 			// found a registration id, but doesn't match any remote procedure
 			caller.Send(&Error{
 				Type:    msg.MessageType(),
@@ -248,12 +278,17 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 				args[0] = details
 			}
 
+			d.registrationMutex.RUnlock()
+
 			invocationID := NewID()
+
+			d.requestMutex.Lock()
 			d.requests[invocationID] = OutstandingRequest{
 				request:   msg.Request,
 				procedure: msg.Procedure,
 				caller:    caller,
 			}
+			d.requestMutex.Unlock()
 
 			rproc.Endpoint.Send(&Invocation{
 				Request:      invocationID,
@@ -268,14 +303,20 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 }
 
 func (d *defaultDealer) Yield(callee Sender, msg *Yield) *MessageEffect {
+	d.requestMutex.Lock()
+
 	request, ok := d.requests[msg.Request]
 	if !ok {
+		d.requestMutex.Unlock()
+
 		// WAMP spec doesn't allow sending an error in response to a YIELD message
 		//log.Println("received YIELD message with invalid invocation request ID:", msg.Request)
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Request)
 	}
 
 	delete(d.requests, msg.Request)
+
+	d.requestMutex.Unlock()
 
 	// return the result to the caller
 	request.caller.Send(&Result{
@@ -289,14 +330,20 @@ func (d *defaultDealer) Yield(callee Sender, msg *Yield) *MessageEffect {
 }
 
 func (d *defaultDealer) Error(peer Sender, msg *Error) *MessageEffect {
+	d.requestMutex.Lock()
+
 	request, ok := d.requests[msg.Request]
 	if !ok {
+		d.requestMutex.Unlock()
+
 		// WAMP spec doesn't allow sending an error in response to a YIELD message
 		//log.Println("received YIELD message with invalid invocation request ID:", msg.Request)
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Request)
 	}
 
 	delete(d.requests, msg.Request)
+
+	d.requestMutex.Unlock()
 
 	// return an error to the caller
 	request.caller.Send(&Error{
@@ -312,39 +359,34 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) *MessageEffect {
 }
 
 func (d *defaultDealer) ClearBlockedCalls() {
-	d.sessRegLock.Lock()
-	defer d.sessRegLock.Unlock()
-
+	// Make sure no one is reading this flag at the time that we change it.
+	d.registrationMutex.Lock()
 	d.waitForRegistration = false
+	d.registrationMutex.Unlock()
 
+	d.requestMutex.Lock()
 	for procedure, callers := range d.blockedCalls {
 		for _, caller := range callers {
 			caller <- true
 		}
 		delete(d.blockedCalls, procedure)
 	}
+	d.requestMutex.Unlock()
 }
 
 // Remove all the registrations for a session that has disconected
 func (d *defaultDealer) lostSession(sess *Session) {
 	// TODO: Do something about outstanding requests
 
-	// Make a copy of the uri's
-	regs := make(map[URI]bool)
-	d.sessRegLock.RLock()
-	for uri, v := range d.sessionRegistrations[sess] {
-		regs[uri] = v
-	}
-	d.sessRegLock.RUnlock()
+	d.registrationMutex.Lock()
+	defer d.registrationMutex.Unlock()
 
-	d.sessRegLock.Lock()
-	for uri, _ := range regs {
+	for uri, _ := range d.sessionRegistrations[sess] {
 		out.Debug("Unregister: %s", string(uri))
 		delete(d.procedures, d.registrations[uri])
 		delete(d.registrations, uri)
 	}
 	delete(d.sessionRegistrations, sess)
-	d.sessRegLock.Unlock()
 }
 
 func (d *defaultDealer) dump() string {
@@ -371,8 +413,8 @@ func (d *defaultDealer) dump() string {
 
 // Testing. Not sure if this works 100 or not
 func (d *defaultDealer) hasRegistration(s URI) bool {
-	d.sessRegLock.RLock()
-	defer d.sessRegLock.RUnlock()
+	d.registrationMutex.RLock()
+	defer d.registrationMutex.RUnlock()
 
 	_, exists := d.registrations[s]
 	return exists
