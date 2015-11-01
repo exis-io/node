@@ -80,11 +80,11 @@ type defaultDealer struct {
 	//
 	// This is intended to solve out-of-order connections of core appliances
 	// during the startup phase on the node.
-	blockedCalls         map[URI][]chan bool
-	waitForRegistration  bool
-	blockedCallsMutex    sync.Mutex
+	blockedCalls        map[URI][]chan bool
+	waitForRegistration bool
+	blockedCallsMutex   sync.Mutex
 
-	sessRegLock          sync.RWMutex
+	sessRegLock sync.RWMutex
 }
 
 func NewDefaultDealer() Dealer {
@@ -109,7 +109,9 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 		tags = strings.Split(parts[1], ",")
 	}
 
+	d.sessRegLock.RLock()
 	if id, ok := d.registrations[endpoint]; ok {
+		defer d.sessRegLock.RUnlock()
 		//log.Println("error: procedure already exists:", msg.Procedure, id)
 		out.Error("error: procedure already exists:", endpoint, id)
 		callee.Send(&Error{
@@ -120,6 +122,7 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 		})
 		return NewErrorMessageEffect(endpoint, ErrProcedureAlreadyExists, 0)
 	}
+	d.sessRegLock.RUnlock()
 
 	reg := NewID()
 
@@ -150,7 +153,9 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 }
 
 func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffect {
+	d.sessRegLock.RLock()
 	if procedure, ok := d.procedures[msg.Registration]; !ok {
+		defer d.sessRegLock.RUnlock()
 		// the registration doesn't exist
 		//log.Println("error: no such registration:", msg.Registration)
 		callee.Send(&Error{
@@ -161,11 +166,12 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 		})
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Registration)
 	} else {
+		d.sessRegLock.RUnlock()
 		d.sessRegLock.Lock()
 		delete(d.sessionRegistrations[callee], procedure.Procedure)
-		d.sessRegLock.Unlock()
 		delete(d.registrations, procedure.Procedure)
 		delete(d.procedures, msg.Registration)
+		d.sessRegLock.Unlock()
 		//log.Printf("unregistered procedure %v [%v]", procedure.Procedure, msg.Registration)
 		callee.Send(&Unregistered{
 			Request: msg.Request,
@@ -244,9 +250,9 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 
 			invocationID := NewID()
 			d.requests[invocationID] = OutstandingRequest{
-				request: msg.Request,
+				request:   msg.Request,
 				procedure: msg.Procedure,
-				caller: caller,
+				caller:    caller,
 			}
 
 			rproc.Endpoint.Send(&Invocation{
@@ -331,13 +337,12 @@ func (d *defaultDealer) lostSession(sess *Session) {
 	}
 	d.sessRegLock.RUnlock()
 
+	d.sessRegLock.Lock()
 	for uri, _ := range regs {
 		out.Debug("Unregister: %s", string(uri))
 		delete(d.procedures, d.registrations[uri])
 		delete(d.registrations, uri)
 	}
-
-	d.sessRegLock.Lock()
 	delete(d.sessionRegistrations, sess)
 	d.sessRegLock.Unlock()
 }
@@ -355,11 +360,11 @@ func (d *defaultDealer) dump() string {
 		ret += "\n\t" + string(k) + ": " + strconv.FormatUint(uint64(v), 16)
 	}
 
-//	ret += "\n  requests:"
-//
-//	for k, v := range d.requests {
-//		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
-//	}
+	//	ret += "\n  requests:"
+	//
+	//	for k, v := range d.requests {
+	//		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
+	//	}
 
 	return ret
 }
