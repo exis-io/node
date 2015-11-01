@@ -7,7 +7,7 @@
         ["", 10]
     ],
     "AuthName": "Auth",
-    "Bouncer": "xs.demo.bouncer",
+    "Bouncer": "xs.demo.Bouncer",
     "MessageLogFile": "messages.log",
     "MessageLogMaxLines": 12500,
     "HoldCalls": 300
