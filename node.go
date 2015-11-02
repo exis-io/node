@@ -259,7 +259,10 @@ func (n *node) SendJoinNotification(sess *Session) {
 // Publish a notification that a session left.
 // If "xs.a.b" leaves, the message is published to "x.a/sessionLeft".
 func (n *node) SendLeaveNotification(sess *Session) {
-	args := []interface{}{}
+	args := []interface{}{
+        string(sess.pdid),
+    }
+    
 	kwargs := map[string]interface{}{
 		"id": sess.Id,
 		"agent": string(sess.pdid),
