@@ -6,6 +6,9 @@
         ["xs", 100],
         ["", 10]
     ],
-    "Bouncer": "xs.demo.bouncer",
-    "MessageLogFile": "messages.log"
+    "AuthName": "Auth",
+    "Bouncer": "xs.demo.Bouncer",
+    "MessageLogFile": "messages.log",
+    "MessageLogMaxLines": 12500,
+    "HoldCalls": 300
 }

@@ -37,8 +37,11 @@ func NewAuthen(node *node) Authen {
 		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
-	authen.CRAuthenticators["token"] = NewTokenAuthenticator(node.agent)
-	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node.agent)
+	agent := node.agent
+	authName := node.Config.AuthName
+
+	authen.CRAuthenticators["token"] = NewTokenAuthenticator(agent, authName)
+	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(agent, authName)
 
 	return authen
 }
@@ -138,29 +141,41 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 	// 	//log.Printf(string(b))
 	// }
 
+	if r.AuthMode == "off" {
+		session.authLevel = AUTH_LOW
+		return &Welcome{}, nil
+	}
+
 	// If client is a local peer, allow it without authentication.
 	if session.isLocal() {
 		session.authLevel = AUTH_HIGH
 		return &Welcome{}, nil
 	}
 
-    if r.AuthMode == "soft" {
-        session.authLevel = AUTH_LOW
-        return &Welcome{}, nil
-    }
-
+	// Get list of supported authmethods from the Hello message.
+	authmethods := []string{}
 	_authmethods, ok := hello.Details["authmethods"].([]interface{})
-
-	if !ok {
-		return nil, fmt.Errorf("could not authenticate with any method")
+	if ok {
+		for _, method := range _authmethods {
+			if m, ok := method.(string); ok {
+				authmethods = append(authmethods, m)
+			}
+		}
 	}
 
-	authmethods := []string{}
-	for _, method := range _authmethods {
-		if m, ok := method.(string); ok {
-			authmethods = append(authmethods, m)
+	// Soft mode allows client to declare an empty list of authmethods and
+	// proceed without authenticating or declare supported authmethods and
+	// proceed with authenticating.
+	//
+	// Default mode requires all clients to authenticate with a valid method.
+	// They still have to declare what methods they support in the Hello
+	// message.
+	if len(authmethods) == 0 {
+		if r.AuthMode == "soft" {
+			session.authLevel = AUTH_LOW
+			return &Welcome{}, nil
 		} else {
-			//log.Printf("invalid authmethod value: %v", method)
+			return nil, fmt.Errorf("could not authenticate with any method")
 		}
 	}
 
@@ -190,7 +205,7 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 	}
 
 	// TODO: check default auth (special '*' auth?)
-	return nil, fmt.Errorf("could not authenticate with any method. May be missing Details authmethod")
+	return nil, fmt.Errorf("could not authenticate with any method")
 }
 
 // checkResponse determines whether the response to the challenge is sufficient to gain access to the Realm.
@@ -256,7 +271,8 @@ type Authenticator interface {
 //
 
 type TokenAuthenticator struct {
-	agent *Client
+	agent    *Client
+	authName string
 }
 
 func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
@@ -266,7 +282,7 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
 
-	for _, auth := range ancestorDomains(authid, "auth") {
+	for _, auth := range ancestorDomains(authid, ta.authName) {
 		out.Debug("Verifying token for %s with %s", authid, auth)
 
 		authEndpoint := auth + "/check_token_1"
@@ -287,9 +303,10 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 	return nil, fmt.Errorf("Unable to verify token with auth")
 }
 
-func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
+func NewTokenAuthenticator(agent *Client, authName string) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
 		agent: agent,
+		authName: authName,
 	}
 	return authenticator
 }
@@ -308,7 +325,8 @@ func NewTokenAuthenticator(agent *Client) *TokenAuthenticator {
 //
 
 type SignatureAuthenticator struct {
-	agent *Client
+	agent    *Client
+	authName string
 }
 
 func (ta *SignatureAuthenticator) Challenge(details map[string]interface{}) (map[string]interface{}, error) {
@@ -352,7 +370,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
-		for _, auth := range ancestorDomains(authid, "auth") {
+		for _, auth := range ancestorDomains(authid, ta.authName) {
 			out.Debug("Asking %s for public key of %s", auth, authid)
 
 			authEndpoint := auth + "/get_appliance_key"
@@ -386,9 +404,10 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	return nil, nil
 }
 
-func NewSignatureAuthenticator(agent *Client) *SignatureAuthenticator {
+func NewSignatureAuthenticator(agent *Client, authName string) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
 		agent: agent,
+		authName: authName,
 	}
 	return authenticator
 }

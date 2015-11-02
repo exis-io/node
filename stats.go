@@ -7,12 +7,25 @@ import (
 	"time"
 )
 
+const messageLogHeader string = "time,type,authid,agent,endpoint,exchange,response,error\n"
+
 type NodeStats struct {
 	startTime     int64
 	lock          sync.Mutex
 	messages      chan string
 	messageCounts map[string]int64
-	messageLog    *os.File
+
+	MessageLog
+}
+
+type MessageLog struct {
+	path  string
+	file  *os.File
+
+	write chan string
+
+	lines    int
+	maxLines int
 }
 
 func NewNodeStats() *NodeStats {
@@ -46,28 +59,63 @@ func (stats *NodeStats) LogEvent(msg string) {
 	stats.messages <- msg
 }
 
-func (stats *NodeStats) OpenMessageLog(path string) error {
+func (stats *NodeStats) OpenMessageLog(path string, maxLines int) error {
 	var err error
-	stats.messageLog, err = os.Create(path)
+
+	stats.MessageLog.path = path
+	stats.MessageLog.lines = 0
+	stats.MessageLog.maxLines = maxLines
+	stats.MessageLog.write = make(chan string)
+
+	stats.MessageLog.file, err = os.Create(path)
 	if err == nil {
-		stats.messageLog.WriteString("time,type,authid,agent,endpoint,exchange,response,error\n")
+		stats.MessageLog.file.WriteString(messageLogHeader)
+		go stats.MessageLog.writeMessages()
+	}
+	return err
+}
+
+// Write the log messages out to a file and periodically rotate it.
+// This is run in a go routine by OpenMessageLog.
+func (log *MessageLog) writeMessages() {
+	for msg := range log.write {
+		log.file.WriteString(msg)
+		log.lines++
+
+		if log.lines >= log.maxLines {
+			log.rotate()
+		}
+	}
+}
+
+func (log *MessageLog) rotate() error {
+	var err error
+
+	log.file.Close()
+
+	newPath := log.path + time.Now().Format(".20060102_150405")
+	os.Rename(log.path, newPath)
+
+	log.lines = 0
+	log.file, err = os.Create(log.path)
+	if err == nil {
+		log.file.WriteString(messageLogHeader)
 	}
 	return err
 }
 
 func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *MessageEffect) {
-	if stats.messageLog != nil {
-		event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s\n",
-				msg.Time.Unix(), msg.Time.Nanosecond(),
-				msg.Type,
-				sess.authid,
-				sess.pdid,
-				effect.Endpoint,
-				effect.InternalID,
-				effect.Response,
-				effect.Error)
-		stats.messageLog.WriteString(event)
-	}
+	event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s\n",
+			msg.Time.Unix(), msg.Time.Nanosecond(),
+			msg.Type,
+			sess.authid,
+			sess.pdid,
+			effect.Endpoint,
+			effect.InternalID,
+			effect.Response,
+			effect.Error)
+
+	stats.MessageLog.write <- event
 }
 
 // Register the getUsage method on the node's internal agent.

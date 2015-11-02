@@ -9,12 +9,6 @@ func NewAuthor() Author {
 	return Author{}
 }
 
-// func (author *Author) Permitted(endpoint URI, sess *Session) bool {
-// 	// TODO: allow all core appliances to perform whatever they want
-// 	if sess.pdid == "pd.bouncer" || sess.pdid == "pd.map" || sess.pdid == "pd.auth" {
-// 		return true
-// 	}
-
 // 	// The node is always permitted to perform any action
 // 	if sess.pdid == n.agent.pdid {
 // 		return true
