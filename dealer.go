@@ -154,13 +154,14 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 		d.sessionRegistrations[callee] = make(map[URI]bool)
 	}
 	d.sessionRegistrations[callee][endpoint] = true
+	d.registrationMutex.Unlock()
 
+	d.requestMutex.Lock()
 	for _, waiting := range d.blockedCalls[endpoint] {
 		waiting <- true
 	}
 	delete(d.blockedCalls, endpoint)
-
-	d.registrationMutex.Unlock()
+	d.requestMutex.Unlock()
 
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
