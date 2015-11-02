@@ -13,8 +13,8 @@ var format = logging.MustStringFormatter(
 )
 
 func Log() {
-	// For demo purposes, create two backend for os.Stderr.
-	backend1 := logging.NewLogBackend(os.Stderr, "", 0)
+	// For demo purposes, create two backend for os.Stdout.
+	backend1 := logging.NewLogBackend(os.Stdout, "", 0)
 	formatter := logging.NewBackendFormatter(backend1, format)
 	backend1Leveled := logging.AddModuleLevel(backend1)
 
