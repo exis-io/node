@@ -77,7 +77,6 @@ func DecodePublicKey(data []byte) (*rsa.PublicKey, error) {
 func ReadPublicKey(path string) (*rsa.PublicKey, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		fmt.Println("read")
 		return nil, err
 	}
 
