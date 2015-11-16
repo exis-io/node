@@ -302,13 +302,11 @@ func (c *Client) handleInvocation(msg *Invocation) {
 }
 
 func (c *Client) registerListener(id ID) {
-	//log.Println("register listener:", id)
 	wait := make(chan Message, 1)
 	c.listeners[id] = wait
 }
 
 func (c *Client) waitOnListener(id ID) (msg Message, err error) {
-	//log.Println("wait on listener:", id)
 	if wait, ok := c.listeners[id]; !ok {
 		return nil, fmt.Errorf("unknown listener ID: %v", id)
 	} else {

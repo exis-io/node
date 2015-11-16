@@ -118,16 +118,8 @@ func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *M
 	stats.MessageLog.write <- event
 }
 
-// Register the getUsage method on the node's internal agent.
-func (node *node) RegisterGetUsage() {
-	options := make(map[string]interface{}, 0)
-	endpoint := string(node.agent.pdid + "/getUsage")
-	node.agent.Register(endpoint, node.stats.GetUsage, options)
-}
-
-// GetUsage is meant to be registered as an RPC function.  Returns a map of
-// strings to counters.
-func (stats *NodeStats) GetUsage(args []interface{}, kwargs map[string]interface{}, details map[string]interface{}) (result *CallResult) {
+// Returns a map of strings to counters.
+func (stats *NodeStats) GetUsage() map[string]int64 {
 	counts := make(map[string]int64, 0)
 
 	stats.lock.Lock()
@@ -139,10 +131,5 @@ func (stats *NodeStats) GetUsage(args []interface{}, kwargs map[string]interface
 	counts["start"] = stats.startTime
 	stats.lock.Unlock()
 
-	// Set up the return value: a one element slice containing the map of
-	// strings to counts.
-	result = &CallResult {
-		Args: []interface{}{counts},
-	}
-	return
+	return counts
 }

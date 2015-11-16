@@ -86,6 +86,10 @@ const (
 	// misconfiguration in the Node.
 	ErrNoSuchRole = URI("wamp.error.no_such_role")
 
+	// The session was evicted by an administrator or a request to delete the
+	// domain.
+	ErrSessionEvicted = URI("wamp.error.session_evicted")
+
 	// Internal node error.  Hopefully, we do not see many of these.
 	ErrInternalError = URI("wamp.error.internal_error")
 )

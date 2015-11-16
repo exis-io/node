@@ -60,7 +60,7 @@ func NewNode(config *NodeConfig) Node {
 	node.agent = node.localClient(config.Agent)
 	node.Authen = NewAuthen(node)
 
-	node.RegisterGetUsage()
+	node.RegisterNodeMethods()
 
 	return node
 }
@@ -491,6 +491,22 @@ func (n *node) Route(msg *Message) string {
 	// Ask map for next hop
 
 	return ""
+}
+
+func (node *node) EvictDomain(domain string) int {
+	count := 0
+
+	node.sessionLock.Lock()
+	defer node.sessionLock.Unlock()
+
+	for dom, sess := range node.sessions {
+		if subdomain(domain, dom) {
+			sess.kill <- ErrSessionEvicted
+			count++
+		}
+	}
+
+	return count
 }
 
 // GetLocalPeer returns an internal peer connected to the specified realm.
