@@ -301,7 +301,7 @@ func (n *node) LogMessage(msg *Message, sess *Session) {
 	// Make errors nice and pretty. These are riffle error messages, not node errors
 	m := *msg
 	if m.MessageType() == ERROR {
-		out.Warning("%s from %s", m.MessageType(), *sess)
+		out.Warning("%s from %s: %v", m.MessageType(), *sess, *msg)
 	} else if err == nil {
 		out.Debug("%s %s from %s", m.MessageType(), string(target), *sess)
 	} else {
