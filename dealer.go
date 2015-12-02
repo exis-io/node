@@ -294,7 +294,7 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 			rproc.Endpoint.Send(&Invocation{
 				Request:      invocationID,
 				Registration: reg,
-				Details:      map[string]interface{}{},
+				Details:      msg.Options,
 				Arguments:    args,
 				ArgumentsKw:  kwargs,
 			})
@@ -315,14 +315,20 @@ func (d *defaultDealer) Yield(callee Sender, msg *Yield) *MessageEffect {
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Request)
 	}
 
-	delete(d.requests, msg.Request)
+	// If the progress option is set, it is a progressive result.  There should
+	// be more YIELDs coming until the final YIELD which does not have the
+	// progress option set.
+	is_progress, ok := msg.Options["progress"].(bool)
+	if !ok || !is_progress {
+		delete(d.requests, msg.Request)
+	}
 
 	d.requestMutex.Unlock()
 
 	// return the result to the caller
 	request.caller.Send(&Result{
 		Request:     request.request,
-		Details:     map[string]interface{}{},
+		Details:     msg.Options,
 		Arguments:   msg.Arguments,
 		ArgumentsKw: msg.ArgumentsKw,
 	})
