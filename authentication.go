@@ -140,6 +140,11 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 	// 	//log.Printf(string(b))
 	// }
 
+	authid, _ := hello.Details["authid"].(string)
+	if authid != "" {
+		session.authid = authid
+	}
+
 	if r.AuthMode == "off" {
 		session.authLevel = AUTH_LOW
 		return &Welcome{}, nil
@@ -176,11 +181,6 @@ func (r Authen) authenticate(session *Session, hello *Hello) (Message, error) {
 		} else {
 			return nil, fmt.Errorf("could not authenticate with any method")
 		}
-	}
-
-	session.authid, _ = hello.Details["authid"].(string)
-	if session.authid == "" {
-		session.authid = string(session.pdid)
 	}
 
 	details := make(map[string]interface{})
