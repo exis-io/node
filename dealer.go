@@ -2,7 +2,6 @@ package node
 
 import (
 	// "reflect"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -23,7 +22,6 @@ type Dealer interface {
 	// Timeout any calls that were waiting for registrations.
 	ClearBlockedCalls()
 
-	dump() string
 	hasRegistration(URI) bool
 	lostSession(*Session)
 }
@@ -40,19 +38,14 @@ type OutstandingRequest struct {
 	caller    Sender
 }
 
-func NewRemoteProcedure(endpoint Sender, procedure URI, tags []string) RemoteProcedure {
+func NewRemoteProcedure(endpoint Sender, procedure URI, tags map[string]bool) RemoteProcedure {
 	proc := RemoteProcedure{
 		Endpoint:    endpoint,
 		Procedure:   procedure,
 		PassDetails: false,
 	}
 
-	for _, tag := range tags {
-		switch {
-		case tag == "details":
-			proc.PassDetails = true
-		}
-	}
+	proc.PassDetails = tags["details"]
 
 	return proc
 }
@@ -65,14 +58,13 @@ type defaultDealer struct {
 	// map registration IDs to procedures
 	procedures map[ID]RemoteProcedure
 
-	// map procedure URIs to registration IDs
-	registrations map[URI]ID
+	// map procedure URIs to registration holders
+	registrations map[URI]RegistrationHolder
 
 	// Keep track of registrations by session, so that we can clean up when the
-	// session closes.  For each session, we have a map[URI]bool, which we are
-	// using as a set of registrations (store true for register, delete for
-	// unregister).
-	sessionRegistrations map[Sender]map[URI]bool
+	// session closes.  For each session, we have a map[ID]URI, which we are
+	// using as a set of registration IDs.
+	sessionRegistrations map[Sender]map[ID]URI
 
 	// waitForRegistration specifies how to treat calls for procedures that do
 	// not exist.  If false, we send back an error immediately.  If true, we
@@ -110,9 +102,9 @@ type defaultDealer struct {
 func NewDefaultDealer() Dealer {
 	return &defaultDealer{
 		procedures:           make(map[ID]RemoteProcedure),
-		registrations:        make(map[URI]ID),
+		registrations:        make(map[URI]RegistrationHolder),
 		requests:             make(map[ID]OutstandingRequest),
-		sessionRegistrations: make(map[Sender]map[URI]bool),
+		sessionRegistrations: make(map[Sender]map[ID]URI),
 		blockedCalls:         make(map[URI][]chan bool),
 		waitForRegistration:  true,
 	}
@@ -124,36 +116,56 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 	parts := strings.SplitN(string(msg.Procedure), "#", 2)
 	endpoint := URI(parts[0])
 
-	var tags []string
+	tags := make(map[string]bool)
 	if len(parts) > 1 {
-		tags = strings.Split(parts[1], ",")
+		for _, tag := range strings.Split(parts[1], ",") {
+			tags[tag] = true
+		}
 	}
 
 	d.registrationMutex.Lock()
-	if id, ok := d.registrations[endpoint]; ok {
-		// Unlock before calling Send.
-		d.registrationMutex.Unlock()
 
-		//log.Println("error: procedure already exists:", msg.Procedure, id)
-		out.Error("error: procedure already exists:", endpoint, id)
-		callee.Send(&Error{
-			Type:    msg.MessageType(),
-			Request: msg.Request,
-			Details: make(map[string]interface{}),
-			Error:   ErrProcedureAlreadyExists,
-		})
-		return NewErrorMessageEffect(endpoint, ErrProcedureAlreadyExists, 0)
+	holder, ok := d.registrations[endpoint]
+	if ok {
+		// Return ErrProcedureAlreadyExists under two cases:
+		// 1. Agent asked for multi-registration, but existing holder will not
+		// allow it.
+		// 2. Agent did not ask for multi-registration, and existing holder
+		// already has a handler.
+		if (tags["multi"] && !holder.CanAdd()) ||
+			(!tags["multi"] && holder.HasHandler()) {
+			// Unlock before calling Send.
+			d.registrationMutex.Unlock()
+
+			//log.Println("error: procedure already exists:", msg.Procedure, id)
+			out.Error("error: procedure already exists:", endpoint)
+			callee.Send(&Error{
+				Type:    msg.MessageType(),
+				Request: msg.Request,
+				Details: make(map[string]interface{}),
+				Error:   ErrProcedureAlreadyExists,
+			})
+			return NewErrorMessageEffect(endpoint, ErrProcedureAlreadyExists, 0)
+		}
+	} else {
+		if tags["multi"] {
+			holder = NewMultiRegistrationHolder()
+		} else {
+			holder = NewSingleRegistrationHolder()
+		}
+
+		d.registrations[endpoint] = holder
 	}
 
 	reg := NewID()
 
+	holder.Add(reg)
 	d.procedures[reg] = NewRemoteProcedure(callee, endpoint, tags)
-	d.registrations[endpoint] = reg
 
 	if d.sessionRegistrations[callee] == nil {
-		d.sessionRegistrations[callee] = make(map[URI]bool)
+		d.sessionRegistrations[callee] = make(map[ID]URI)
 	}
-	d.sessionRegistrations[callee][endpoint] = true
+	d.sessionRegistrations[callee][reg] = endpoint
 	d.registrationMutex.Unlock()
 
 	d.requestMutex.Lock()
@@ -187,9 +199,16 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 		})
 		return NewErrorMessageEffect("", ErrNoSuchRegistration, msg.Registration)
 	} else {
-		delete(d.sessionRegistrations[callee], procedure.Procedure)
-		delete(d.registrations, procedure.Procedure)
+		delete(d.sessionRegistrations[callee], msg.Registration)
 		delete(d.procedures, msg.Registration)
+
+		holder, ok := d.registrations[procedure.Procedure]
+		if ok {
+			holder.Remove(msg.Registration)
+			if !holder.HasHandler() {
+				delete(d.registrations, procedure.Procedure)
+			}
+		}
 
 		d.registrationMutex.Unlock()
 
@@ -203,8 +222,8 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 
 // Call with registrationMutex read lock held.
 func (d *defaultDealer) shouldHoldCall(procedure URI) bool {
-	_, exists := d.registrations[procedure]
-	return (!exists && d.waitForRegistration)
+	holder, exists := d.registrations[procedure]
+	return !exists || !holder.HasHandler()
 }
 
 func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
@@ -223,7 +242,8 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 		d.registrationMutex.RLock()
 	}
 
-	if reg, ok := d.registrations[msg.Procedure]; !ok {
+	holder, ok := d.registrations[msg.Procedure]
+	if !ok || !holder.HasHandler() {
 		d.registrationMutex.RUnlock()
 		caller.Send(&Error{
 			Type:    msg.MessageType(),
@@ -233,6 +253,7 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 		})
 		return NewErrorMessageEffect(msg.Procedure, ErrNoSuchProcedure, 0)
 	} else {
+		reg, _ := holder.GetHandler()
 		if rproc, ok := d.procedures[reg]; !ok {
 			d.registrationMutex.RUnlock()
 			// found a registration id, but doesn't match any remote procedure
@@ -388,34 +409,20 @@ func (d *defaultDealer) lostSession(sess *Session) {
 	d.registrationMutex.Lock()
 	defer d.registrationMutex.Unlock()
 
-	for uri, _ := range d.sessionRegistrations[sess] {
+	for id, uri := range d.sessionRegistrations[sess] {
 		out.Debug("Unregister: %s", string(uri))
-		delete(d.procedures, d.registrations[uri])
-		delete(d.registrations, uri)
+
+		holder, ok := d.registrations[uri]
+		if ok {
+			holder.Remove(id)
+			if !holder.HasHandler() {
+				delete(d.registrations, uri)
+			}
+		}
+
+		delete(d.procedures, id)
 	}
 	delete(d.sessionRegistrations, sess)
-}
-
-func (d *defaultDealer) dump() string {
-	ret := "  functions:"
-
-	for k, v := range d.procedures {
-		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + string(v.Procedure)
-	}
-
-	ret += "\n  registrations:"
-
-	for k, v := range d.registrations {
-		ret += "\n\t" + string(k) + ": " + strconv.FormatUint(uint64(v), 16)
-	}
-
-	//	ret += "\n  requests:"
-	//
-	//	for k, v := range d.requests {
-	//		ret += "\n\t" + strconv.FormatUint(uint64(k), 16) + ": " + strconv.FormatUint(uint64(v), 16)
-	//	}
-
-	return ret
 }
 
 // Testing. Not sure if this works 100 or not
@@ -423,6 +430,6 @@ func (d *defaultDealer) hasRegistration(s URI) bool {
 	d.registrationMutex.RLock()
 	defer d.registrationMutex.RUnlock()
 
-	_, exists := d.registrations[s]
-	return exists
+	holder, exists := d.registrations[s]
+	return exists && holder.HasHandler()
 }
