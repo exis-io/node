@@ -222,6 +222,10 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 
 // Call with registrationMutex read lock held.
 func (d *defaultDealer) shouldHoldCall(procedure URI) bool {
+	if !d.waitForRegistration {
+		return false
+	}
+
 	holder, exists := d.registrations[procedure]
 	return !exists || !holder.HasHandler()
 }
