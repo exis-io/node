@@ -22,6 +22,8 @@ type Dealer interface {
 	// Timeout any calls that were waiting for registrations.
 	ClearBlockedCalls()
 
+	UnregisterAll(URI) int
+
 	hasRegistration(URI) bool
 	lostSession(*Session)
 }
@@ -404,6 +406,46 @@ func (d *defaultDealer) ClearBlockedCalls() {
 		delete(d.blockedCalls, procedure)
 	}
 	d.requestMutex.Unlock()
+}
+
+// Unregister all handlers for a given endpoint.  Use with caution!  The
+// agent(s) who registered the endpoint will not be informed that their
+// registration has been removed from the node.
+func (d *defaultDealer) UnregisterAll(endpoint URI) int {
+	var unregistered = 0
+
+	d.registrationMutex.Lock()
+	defer d.registrationMutex.Unlock()
+
+	holder, ok := d.registrations[endpoint]
+	if !ok {
+		return unregistered
+	}
+
+	for {
+		regid, ok := holder.GetHandler()
+		if !ok {
+			break
+		}
+
+		rproc, ok := d.procedures[regid]
+		if ok {
+			// TODO: Should send a message to the agent who registered this
+			// endpoint, but the Unregistered message can only be sent in
+			// response to an Unregister request.
+			out.Debug("UNREGISTER %s from %s", endpoint, rproc.Endpoint)
+			delete(d.sessionRegistrations[rproc.Endpoint], regid)
+			delete(d.procedures, regid)
+		}
+
+		holder.Remove(regid)
+
+		unregistered++
+	}
+
+	delete(d.registrations, endpoint)
+
+	return unregistered
 }
 
 // Remove all the registrations for a session that has disconected
