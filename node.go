@@ -412,7 +412,10 @@ func (n *node) Handle(msg *Message, sess *Session) {
 		out.Critical("Unhandled message:", msg.MessageType())
 	}
 
-	n.stats.LogMessage(sess, handled, effect)
+	// effect is nil in the case of messages we don't know how to handle.
+	if effect != nil {
+		n.stats.LogMessage(sess, handled, effect)
+	}
 }
 
 // Return true or false based on the message and the session which sent the message
