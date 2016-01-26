@@ -11,7 +11,7 @@ Fork of jcelliot's turnpike.
 
 3. Download the node source code.
 
-> go get github.com/ParadropLabs/node
+> go get github.com/exis-io/node
 
 4. Start the node
-> go run $GOPATH/src/github.com/ParadropLabs/node/runner/main.go
+> go run $GOPATH/src/github.com/exis-io/node/runner/main.go

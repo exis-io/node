@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ParadropLabs/node"
+	"github.com/exis-io/node"
 )
 
 // var client *rabric.Client
