@@ -65,10 +65,10 @@ func (stats *NodeStats) OpenMessageLog(path string, maxLines int) error {
 	stats.MessageLog.path = path
 	stats.MessageLog.lines = 0
 	stats.MessageLog.maxLines = maxLines
-	stats.MessageLog.write = make(chan string)
 
 	stats.MessageLog.file, err = os.Create(path)
 	if err == nil {
+		stats.MessageLog.write = make(chan string)
 		stats.MessageLog.file.WriteString(messageLogHeader)
 		go stats.MessageLog.writeMessages()
 	}
@@ -115,7 +115,9 @@ func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *M
 			effect.Response,
 			effect.Error)
 
-	stats.MessageLog.write <- event
+	if stats.MessageLog.write != nil {
+		stats.MessageLog.write <- event
+	}
 }
 
 // Returns a map of strings to counters.
