@@ -236,6 +236,8 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 	d.registrationMutex.RLock()
 
 	if d.shouldHoldCall(msg.Procedure) {
+		out.Debug("Hold CALL %s from %s", msg.Procedure, caller)
+
 		ready := make(chan bool)
 
 		d.requestMutex.Lock()
