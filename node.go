@@ -547,7 +547,7 @@ func (n *node) localClient(s string) *Client {
 	p := n.getTestPeer()
 
 	client := NewClient(p)
-	client.ReceiveTimeout = 1000 * time.Millisecond
+	client.ReceiveTimeout = 5 * time.Second
 	if _, err := client.JoinRealm(s, nil); err != nil {
 		out.Error("Error when creating new client: ", err)
 	}
