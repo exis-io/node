@@ -5,6 +5,12 @@ import (
 	"io/ioutil"
 )
 
+type ServerConfig struct {
+	Certificate string
+	Key         string
+	Port        int
+}
+
 type NodeConfig struct {
 	Agent              string
 	RequestLimits      [][]interface{}
@@ -13,6 +19,7 @@ type NodeConfig struct {
 	MessageLogFile     string
 	MessageLogMaxLines int
 	HoldCalls          int
+	Servers            []ServerConfig
 }
 
 func LoadConfig(path string) (*NodeConfig, error) {
