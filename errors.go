@@ -76,6 +76,9 @@ const (
 	// operation itself failed. E.g. a custom authorizer ran into an error.
 	ErrAuthorizationFailed = URI("wamp.error.authorization_failed")
 
+	// Authentication (identity verification) failed.
+	ErrAuthenticationFailed = URI("wamp.error.authentication_failed")
+
 	// Peer wanted to join a non-existing realm (and the Node did not allow to
 	// auto-create the realm)
 	ErrNoSuchRealm = URI("wamp.error.no_such_realm")

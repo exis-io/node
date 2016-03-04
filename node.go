@@ -5,8 +5,10 @@ package node
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
+	"github.com/garyburd/redigo/redis"
 )
 
 type Node interface {
@@ -29,6 +31,7 @@ type node struct {
 	stats       *NodeStats
 	PermMode    string
 	Config      *NodeConfig
+	RedisPool   *redis.Pool
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
@@ -41,6 +44,7 @@ func NewNode(config *NodeConfig) Node {
 		stats:    NewNodeStats(),
 		PermMode: os.Getenv("EXIS_PERMISSIONS"),
 		Config:   config,
+		RedisPool: NewRedisPool(config.RedisServer, config.RedisPassword),
 	}
 
 	// Open a file for logging messages.
@@ -146,6 +150,39 @@ func (node *node) Listen(sess *Session) {
 	}
 }
 
+// Assign a session ID to a new session.
+//
+// authid: domain of agent according to validated credentials
+// domain: domain requested by the agent, verified subdomain of authid
+// authextra: extra data passed with Hello message
+func (n *node) assignSessionID(authid string, domain string, authextra map[string]interface{}) (ID, error) {
+	// We must have been configured to connect to Redis in order to support
+	// persistent session IDs.
+	if n.Config.RedisServer == "" {
+		return NewID(), nil
+	}
+
+	fmt.Printf("authextra: %v\n", authextra)
+	sessionID, ok := authextra["sessionID"].(string)
+	if ok {
+		tmpID, err := strconv.ParseInt(sessionID, 0, 64)
+		if err != nil {
+			return ID(0), fmt.Errorf("Error parsing session ID (%s)", sessionID)
+		}
+
+		reclaimID := ID(tmpID)
+		err = ReclaimSessionID(n.RedisPool, reclaimID, authid, domain)
+		if err != nil {
+			return ID(0), err
+		}
+
+		return reclaimID, nil
+	}
+
+	newID, err := NewSessionID(n.RedisPool, domain)
+	return newID, err
+}
+
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
 	handled := NewHandledMessage("Hello")
@@ -186,16 +223,26 @@ func (n *node) Handshake(client Peer) (Session, error) {
 
 	if err != nil {
 		abort := &Abort{
-			Reason:  ErrAuthorizationFailed, // TODO: should this be AuthenticationFailed?
+			Reason:  ErrAuthenticationFailed,
 			Details: map[string]interface{}{"error": err.Error()},
 		}
-
 		logErr(client.Send(abort))
 		logErr(client.Close())
 		return sess, AuthenticationError(err.Error())
 	}
 
-	welcome.Id = NewID()
+	authextra, _ := hello.Details["authextra"].(map[string]interface{})
+
+	welcome.Id, err = n.assignSessionID(sess.authid, string(sess.pdid), authextra)
+	if err != nil {
+		abort := &Abort{
+			Reason:  ErrAuthenticationFailed,
+			Details: map[string]interface{}{"error": err.Error()},
+		}
+		logErr(client.Send(abort))
+		logErr(client.Close())
+		return sess, AuthenticationError(err.Error())
+	}
 
 	if welcome.Details == nil {
 		welcome.Details = make(map[string]interface{})
