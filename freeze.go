@@ -7,6 +7,7 @@ package node
 
 import (
 	"fmt"
+	"time"
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -71,6 +72,30 @@ func ReclaimSessionID(pool *redis.Pool, sessionID ID, authid string, domain stri
 	}
 }
 
+func StoreSessionDetails(pool *redis.Pool, sessionID ID, details map[string]interface{}) {
+	conn := pool.Get()
+	defer conn.Close()
+
+	sessionKey := fmt.Sprintf("session:%x", sessionID)
+
+	guardian, ok := details["guardianDomain"].(string)
+	if ok && guardian != "" {
+		endpoint := guardian + "/thaw"
+		_, err := conn.Do("HSET", sessionKey, "thawEndpoint", endpoint)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	id, ok := details["guardianID"].(string)
+	if ok && id != "" {
+		_, err := conn.Do("HSET", sessionKey, "thawID", id)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+}
+
 func GetFrozenRegistration(pool *redis.Pool, endpoint string) (*frozenRegistration, error) {
 	conn := pool.Get()
 	defer conn.Close()
@@ -114,9 +139,26 @@ func GetFrozenRegistration(pool *redis.Pool, endpoint string) (*frozenRegistrati
 		return freg, nil
 	}
 
-	return nil, fmt.Errorf("Not implemented")
+	// This means we found registrations, but are not able to thaw them.
+	return nil, fmt.Errorf("No session available to handle %s", endpoint)
 }
 
-func StoreFrozenRegistration(pool *redis.Pool, reg *frozenRegistration) error {
+func StoreRegistration(pool *redis.Pool, endpoint URI, sessionID ID) error {
+	conn := pool.Get()
+	defer conn.Close()
+
+	// For now, set priority to registration time so that newer registrations
+	// override older ones.
+	// TODO: allow caller to set a priority, and put those in the higher bits
+	// so that time still breaks ties.
+	priority := time.Now().Unix()
+
+	regKey := fmt.Sprintf("registered:%s", endpoint)
+	_, err := conn.Do("ZADD", regKey, priority, int64(sessionID))
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
 	return nil
 }

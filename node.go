@@ -16,6 +16,8 @@ type Node interface {
 	Listen(*Session)
 	Close() error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
+
+	SupportFrozenSessions() bool
 }
 
 type node struct {
@@ -26,7 +28,7 @@ type node struct {
 	Dealer
 	Agent
 	agent       *Client
-	sessions    map[string]Session
+	sessions    map[ID]Session
 	sessionLock sync.RWMutex
 	stats       *NodeStats
 	PermMode    string
@@ -37,15 +39,16 @@ type node struct {
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(config *NodeConfig) Node {
 	node := &node{
-		sessions: make(map[string]Session, 0),
+		sessions: make(map[ID]Session),
 		Broker:   NewDefaultBroker(),
-		Dealer:   NewDefaultDealer(),
 		Agent:    NewAgent(),
 		stats:    NewNodeStats(),
 		PermMode: os.Getenv("EXIS_PERMISSIONS"),
 		Config:   config,
 		RedisPool: NewRedisPool(config.RedisServer, config.RedisPassword),
 	}
+
+	node.Dealer = NewDefaultDealer(node)
 
 	// Open a file for logging messages.
 	// Note: this must come before we set up the local agent.
@@ -57,7 +60,7 @@ func NewNode(config *NodeConfig) Node {
 	if config.HoldCalls > 0 {
 		go func() {
 			time.Sleep(time.Duration(config.HoldCalls) * time.Second)
-			node.Dealer.ClearBlockedCalls()
+			node.Dealer.SetCallHolding(false)
 		}()
 	}
 
@@ -90,7 +93,7 @@ func (node *node) Close() error {
 
 	// Clear the map (might not be needed)
 	node.sessionLock.Lock()
-	node.sessions = make(map[string]Session, 0)
+	node.sessions = make(map[ID]Session)
 	node.sessionLock.Unlock()
 
 	return nil
@@ -244,6 +247,10 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		return sess, AuthenticationError(err.Error())
 	}
 
+	if n.SupportFrozenSessions() {
+		StoreSessionDetails(n.RedisPool, welcome.Id, authextra)
+	}
+
 	if welcome.Details == nil {
 		welcome.Details = make(map[string]interface{})
 	}
@@ -262,7 +269,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	out.Notice("Session open: %s", string(hello.Realm))
 	sess.Id = welcome.Id
 	n.sessionLock.Lock()
-	n.sessions[string(hello.Realm)] = sess
+	n.sessions[sess.Id] = sess
 	n.sessionLock.Unlock()
 
 	// Note: we are ignoring the CR exchange and just logging it as a
@@ -286,7 +293,7 @@ func (n *node) SessionClose(sess *Session) {
 	n.SendLeaveNotification(sess)
 
 	n.sessionLock.Lock()
-	delete(n.sessions, string(sess.pdid))
+	delete(n.sessions, sess.Id)
 	n.sessionLock.Unlock()
 
 	// We log a special _Close message in case there was no Goodbye message
@@ -482,22 +489,6 @@ func (n *node) Permitted(endpoint URI, sess *Session, verb string) bool {
 		return true
 	}
 
-	// Look up auth level of receiver.  The action will not be permitted if the
-	// receiver is more strongly authenticated than the caller.
-	//
-	// This code is only for testing interaction with authenticated agents
-	// without breaking unauthenticated agents.
-	//
-	// TODO: Remove this code when all agents are authenticated.
-	targetDomain, _ := extractDomain(string(endpoint))
-	n.sessionLock.RLock()
-	targetSession, ok := n.sessions[targetDomain]
-	n.sessionLock.RUnlock()
-	if ok && targetSession.authLevel > sess.authLevel {
-		out.Warning("Communication with authenticated agent %s not permitted", targetSession.pdid)
-		return false
-	}
-
 	// TODO Check permissions cache: if found, allow
 	// TODO: save a permitted action in some flavor of cache
 
@@ -549,8 +540,8 @@ func (node *node) EvictDomain(domain string) int {
 	node.sessionLock.Lock()
 	defer node.sessionLock.Unlock()
 
-	for dom, sess := range node.sessions {
-		if subdomain(domain, dom) {
+	for _, sess := range node.sessions {
+		if subdomain(domain, string(sess.pdid)) {
 			sess.kill <- ErrSessionEvicted
 			count++
 		}
@@ -584,6 +575,12 @@ var defaultWelcomeDetails = map[string]interface{}{
 		"broker": {},
 		"dealer": {},
 	},
+}
+
+// Is support for frozen sessions enabled?
+// Requires external persistence of session information.
+func (r *node) SupportFrozenSessions() bool {
+	return r.Config.RedisServer != ""
 }
 
 ////////////////////////////////////////

@@ -4,12 +4,13 @@ import (
 	// "reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 // A Dealer routes and manages RPC calls to callees.
 type Dealer interface {
 	// Register a procedure on an endpoint
-	Register(Sender, *Register) *MessageEffect
+	Register(*Session, *Register) *MessageEffect
 	// Unregister a procedure on an endpoint
 	Unregister(Sender, *Unregister) *MessageEffect
 	// Call a procedure on an endpoint
@@ -19,10 +20,8 @@ type Dealer interface {
 	// Handle an ERROR message from an invocation
 	Error(Sender, *Error) *MessageEffect
 
-	// Timeout any calls that were waiting for registrations.
-	ClearBlockedCalls()
-
 	UnregisterAll(URI) int
+	SetCallHolding(bool)
 
 	hasRegistration(URI) bool
 	lostSession(*Session)
@@ -53,6 +52,8 @@ func NewRemoteProcedure(endpoint Sender, procedure URI, tags map[string]bool) Re
 }
 
 type defaultDealer struct {
+	node *node
+
 	//
 	// Registrations
 	//
@@ -95,24 +96,28 @@ type defaultDealer struct {
 	// Map procedure URIs to lists of channels that are blocked waiting for
 	// registrations on those URIs.  See the comment for the
 	// waitForRegistration flag.
-	blockedCalls        map[URI][]chan bool
+	blockedCalls        map[URI]map[Sender]chan bool
 
 	// Protect requests and blockedCalls maps.
 	requestMutex        sync.Mutex
+
+	holdTimeout         time.Duration
 }
 
-func NewDefaultDealer() Dealer {
+func NewDefaultDealer(node *node) Dealer {
 	return &defaultDealer{
+        node:                 node,
 		procedures:           make(map[ID]RemoteProcedure),
 		registrations:        make(map[URI]RegistrationHolder),
 		requests:             make(map[ID]OutstandingRequest),
 		sessionRegistrations: make(map[Sender]map[ID]URI),
-		blockedCalls:         make(map[URI][]chan bool),
+		blockedCalls:         make(map[URI]map[Sender]chan bool),
 		waitForRegistration:  true,
+		holdTimeout:          time.Duration(node.Config.HoldCalls) * time.Second,
 	}
 }
 
-func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
+func (d *defaultDealer) Register(callee *Session, msg *Register) *MessageEffect {
 	// Endpoint may contain a # sign to pass comma-separated tags.
 	// Example: pd.agent/function#details
 	parts := strings.SplitN(string(msg.Procedure), "#", 2)
@@ -177,6 +182,10 @@ func (d *defaultDealer) Register(callee Sender, msg *Register) *MessageEffect {
 	delete(d.blockedCalls, endpoint)
 	d.requestMutex.Unlock()
 
+	if d.node.SupportFrozenSessions() {
+		go StoreRegistration(d.node.RedisPool, endpoint, callee.Id)
+	}
+
 	//log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
 	callee.Send(&Registered{
 		Request:      msg.Request,
@@ -224,32 +233,44 @@ func (d *defaultDealer) Unregister(callee Sender, msg *Unregister) *MessageEffec
 
 // Call with registrationMutex read lock held.
 func (d *defaultDealer) shouldHoldCall(procedure URI) bool {
-	if !d.waitForRegistration {
+	holder, exists := d.registrations[procedure]
+	if exists && holder.HasHandler() {
 		return false
 	}
 
-	holder, exists := d.registrations[procedure]
-	return !exists || !holder.HasHandler()
-}
+	if d.node.SupportFrozenSessions() {
+		freg, err := GetFrozenRegistration(d.node.RedisPool, string(procedure))
+		if err == nil {
+			// Attempt to thaw the frozen session in the background and
+			// return to Hold the caller until the recipient is ready.
+			//
+			// This is ever so slightly racy.  If the frozen session manages to
+			// start up and register its call before we add the caller to the
+			// blockedCalls table, then the caller will end up waiting the full
+			// timeout period before his call goes through.  It is functionally
+			// correct, though.
+			go func() {
+				args := []interface{}{freg.thawID, freg.sessionID}
+				_, err := d.node.agent.Call(freg.thawEndpoint, args, nil)
+				if err != nil {
+					out.Debug("Error from thaw method %s: %s", freg.thawEndpoint,
+							err.Error())
+				}
+			}()
 
-func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
-	d.registrationMutex.RLock()
-
-	if d.shouldHoldCall(msg.Procedure) {
-		out.Debug("Hold CALL %s from %s", msg.Procedure, caller)
-
-		ready := make(chan bool)
-
-		d.requestMutex.Lock()
-		d.blockedCalls[msg.Procedure] = append(d.blockedCalls[msg.Procedure], ready)
-		d.requestMutex.Unlock()
-
-		// Unlock while we block on the channel.
-		d.registrationMutex.RUnlock()
-		<-ready
-		d.registrationMutex.RLock()
+			return true
+		} else {
+			out.Debug("GetFrozenRegistration says: %s", err.Error())
+		}
 	}
 
+	// Did not find a handler anywhere.  Are we in startup mode?
+	return d.waitForRegistration
+}
+
+// Call with a read lock on d.registrationMutex
+// This function releases the lock before returning.
+func (d *defaultDealer) resolveCall(caller Sender, msg *Call) *MessageEffect {
 	holder, ok := d.registrations[msg.Procedure]
 	if !ok || !holder.HasHandler() {
 		d.registrationMutex.RUnlock()
@@ -332,6 +353,74 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 	}
 }
 
+func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
+	d.registrationMutex.RLock()
+
+	if d.shouldHoldCall(msg.Procedure) {
+		out.Debug("Hold CALL %s from %s", msg.Procedure, caller)
+
+		ready := make(chan bool)
+
+		d.requestMutex.Lock()
+		if d.blockedCalls[msg.Procedure] == nil {
+			d.blockedCalls[msg.Procedure] = make(map[Sender]chan bool)
+		} else if d.blockedCalls[msg.Procedure][caller] != nil {
+			// If this section executes, a session somehow triggered more than
+			// one blocked call.  It means my assumption that there can be at
+			// most one was wrong, and some restructuring of the code will be
+			// necessary to handle more than one blocked call correctly.
+			d.requestMutex.Unlock()
+			d.registrationMutex.RUnlock()
+
+			out.Warning("Hold already in progress for %s from %s", msg.Procedure,
+					caller)
+
+			caller.Send(&Error{
+				Type:    msg.MessageType(),
+				Request: msg.Request,
+				Details: make(map[string]interface{}),
+				Error: ErrInternalError,
+			})
+
+			return NewErrorMessageEffect(msg.Procedure, ErrInternalError, 0)
+		}
+		d.blockedCalls[msg.Procedure][caller] = ready
+		d.requestMutex.Unlock()
+
+		// Unlock while we block on the channel.
+		d.registrationMutex.RUnlock()
+
+		select {
+		case <-time.After(d.holdTimeout):
+			out.Debug("Timed out waiting for %s", msg.Procedure)
+
+			// We timed out waiting for a registration to come in.  Delete the
+			// information from the blocked calls table and send an error to
+			// the caller.
+			d.requestMutex.Lock()
+			delete(d.blockedCalls[msg.Procedure], caller)
+			d.requestMutex.Unlock()
+
+			caller.Send(&Error{
+				Type:    msg.MessageType(),
+				Request: msg.Request,
+				Details: make(map[string]interface{}),
+				Error:   ErrNoSuchProcedure,
+			})
+
+			return NewErrorMessageEffect(msg.Procedure, ErrNoSuchProcedure, 0)
+		case <-ready:
+			// A registration occurred while we were waiting, so we are ready
+			// to proceed to make the call.
+		}
+
+		d.registrationMutex.RLock()
+	}
+
+	// Releases the read lock on registrationMutex.
+	return d.resolveCall(caller, msg)
+}
+
 func (d *defaultDealer) Yield(callee Sender, msg *Yield) *MessageEffect {
 	d.requestMutex.Lock()
 
@@ -394,22 +483,6 @@ func (d *defaultDealer) Error(peer Sender, msg *Error) *MessageEffect {
 	return NewErrorMessageEffect(request.procedure, msg.Error, msg.Request)
 }
 
-func (d *defaultDealer) ClearBlockedCalls() {
-	// Make sure no one is reading this flag at the time that we change it.
-	d.registrationMutex.Lock()
-	d.waitForRegistration = false
-	d.registrationMutex.Unlock()
-
-	d.requestMutex.Lock()
-	for procedure, callers := range d.blockedCalls {
-		for _, caller := range callers {
-			caller <- true
-		}
-		delete(d.blockedCalls, procedure)
-	}
-	d.requestMutex.Unlock()
-}
-
 // Unregister all handlers for a given endpoint.  Use with caution!  The
 // agent(s) who registered the endpoint will not be informed that their
 // registration has been removed from the node.
@@ -448,6 +521,13 @@ func (d *defaultDealer) UnregisterAll(endpoint URI) int {
 	delete(d.registrations, endpoint)
 
 	return unregistered
+}
+
+func (d *defaultDealer) SetCallHolding(enable bool) {
+	// Make sure no one is reading this flag at the time that we change it.
+	d.registrationMutex.Lock()
+	d.waitForRegistration = enable
+	d.registrationMutex.Unlock()
 }
 
 // Remove all the registrations for a session that has disconected
