@@ -40,12 +40,19 @@ type node struct {
 func NewNode(config *NodeConfig) Node {
 	node := &node{
 		sessions: make(map[ID]Session),
-		Broker:   NewDefaultBroker(),
 		Agent:    NewAgent(),
 		stats:    NewNodeStats(),
 		PermMode: os.Getenv("EXIS_PERMISSIONS"),
 		Config:   config,
 		RedisPool: NewRedisPool(config.RedisServer, config.RedisPassword),
+	}
+
+	if config.RedisServer == "" {
+		fmt.Println("Redis: DISABLED")
+		node.Broker = NewDefaultBroker(node)
+	} else {
+		fmt.Printf("Redis: %s\n", config.RedisServer)
+		node.Broker = NewRedisBroker(node)
 	}
 
 	node.Dealer = NewDefaultDealer(node)
