@@ -7,8 +7,8 @@ package node
 
 import (
 	"fmt"
-	"time"
 	"github.com/garyburd/redigo/redis"
+	"time"
 )
 
 const (
@@ -16,10 +16,10 @@ const (
 )
 
 type redisSetIterator struct {
-    conn   redis.Conn
-    key    string
-    cursor int
-    values []interface{}
+	conn   redis.Conn
+	key    string
+	cursor int
+	values []interface{}
 }
 
 func (iter *redisSetIterator) Int64() int64 {
@@ -33,33 +33,33 @@ func (iter *redisSetIterator) String() string {
 }
 
 func (iter *redisSetIterator) Next() bool {
-    if len(iter.values) > 0 {
-        iter.values = iter.values[1:]
-    }
+	if len(iter.values) > 0 {
+		iter.values = iter.values[1:]
+	}
 
-    for len(iter.values) == 0 && iter.cursor != 0 {
-        // Special initialization case: -1 means this is the first query.
-        if iter.cursor == -1 {
-            iter.cursor = 0
-        }
+	for len(iter.values) == 0 && iter.cursor != 0 {
+		// Special initialization case: -1 means this is the first query.
+		if iter.cursor == -1 {
+			iter.cursor = 0
+		}
 
-        arr, err := redis.Values(iter.conn.Do("SSCAN", iter.key, iter.cursor))
-        if err != nil {
-            return false
-        }
+		arr, err := redis.Values(iter.conn.Do("SSCAN", iter.key, iter.cursor))
+		if err != nil {
+			return false
+		}
 
-        iter.cursor, _ = redis.Int(arr[0], nil)
+		iter.cursor, _ = redis.Int(arr[0], nil)
 		iter.values, _ = redis.Values(arr[1], nil)
-    }
+	}
 
-    return (len(iter.values) > 0)
+	return (len(iter.values) > 0)
 }
 
 func (iter *redisSetIterator) Close() {
-    if iter.conn != nil {
-        iter.conn.Close()
-        iter.conn = nil
-    }
+	if iter.conn != nil {
+		iter.conn.Close()
+		iter.conn = nil
+	}
 }
 
 func NewSessionID(pool *redis.Pool, domain string) (ID, error) {
@@ -226,90 +226,90 @@ func ThawSession(pool *redis.Pool, agent *Client, session ID) error {
 }
 
 func RemoveRegistrations(conn redis.Conn, session ID) {
-    iter := redisSetIterator{
-        conn: conn,
-        key: fmt.Sprintf("registered:%x", session),
-        cursor: -1,
-    }
+	iter := redisSetIterator{
+		conn:   conn,
+		key:    fmt.Sprintf("registered:%x", session),
+		cursor: -1,
+	}
 
-    for iter.Next() {
-        registrationKey := iter.String()
+	for iter.Next() {
+		registrationKey := iter.String()
 
-        endpoint, err := redis.String(conn.Do("HGET", registrationKey, "endpoint"))
-        if err != nil {
-            out.Debug("Redis error from key %s: %v", registrationKey, err)
-        }
+		endpoint, err := redis.String(conn.Do("HGET", registrationKey, "endpoint"))
+		if err != nil {
+			out.Debug("Redis error from key %s: %v", registrationKey, err)
+		}
 
-        if endpoint != "" {
-            proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
-            _, err := conn.Do("ZREM", proceduresKey, registrationKey)
-            if err != nil {
-                out.Debug("Redis error from key %s: %v", proceduresKey, err)
-            }
-        }
+		if endpoint != "" {
+			proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
+			_, err := conn.Do("ZREM", proceduresKey, registrationKey)
+			if err != nil {
+				out.Debug("Redis error from key %s: %v", proceduresKey, err)
+			}
+		}
 
-        _, err = conn.Do("DEL", registrationKey)
-        if err != nil {
-            out.Debug("Redis error from key %s: %v", registrationKey, err)
-        }
-    }
+		_, err = conn.Do("DEL", registrationKey)
+		if err != nil {
+			out.Debug("Redis error from key %s: %v", registrationKey, err)
+		}
+	}
 
-    _, err := conn.Do("DEL", iter.key)
-    if err != nil {
-        out.Debug("Redis error from key %s: %v", iter.key, err)
-    }
+	_, err := conn.Do("DEL", iter.key)
+	if err != nil {
+		out.Debug("Redis error from key %s: %v", iter.key, err)
+	}
 }
 
 func RemoveSubscriptions(conn redis.Conn, session ID) {
-    // Leverage the iterator code to walk the subscriptions for a session
-    // rather than endpoint.
-    // Do not close the iterator because we will close the connection later.
-    iter := &subscriptionIterator{
-        conn: conn,
-        key: fmt.Sprintf("subscribed:%x", session),
-        cursor: -1,
-    }
+	// Leverage the iterator code to walk the subscriptions for a session
+	// rather than endpoint.
+	// Do not close the iterator because we will close the connection later.
+	iter := &subscriptionIterator{
+		conn:   conn,
+		key:    fmt.Sprintf("subscribed:%x", session),
+		cursor: -1,
+	}
 
-    for iter.Next() {
-        sub := iter.Value()
+	for iter.Next() {
+		sub := iter.Value()
 
-        subscriptionKey := fmt.Sprintf("subscription:%x:%x", session, sub.ID)
+		subscriptionKey := fmt.Sprintf("subscription:%x:%x", session, sub.ID)
 
-        subscribersKey := fmt.Sprintf("subscribers:%s", sub.Endpoint)
-        _, err := conn.Do("SREM", subscribersKey, subscriptionKey)
-        if err != nil {
-            out.Debug("Redis error from key %s: %v", subscribersKey, err)
-        }
+		subscribersKey := fmt.Sprintf("subscribers:%s", sub.Endpoint)
+		_, err := conn.Do("SREM", subscribersKey, subscriptionKey)
+		if err != nil {
+			out.Debug("Redis error from key %s: %v", subscribersKey, err)
+		}
 
-        _, err = conn.Do("DEL", subscriptionKey)
-        if err != nil {
-            out.Debug("Redis error from key %s: %v", subscriptionKey, err)
-        }
-    }
+		_, err = conn.Do("DEL", subscriptionKey)
+		if err != nil {
+			out.Debug("Redis error from key %s: %v", subscriptionKey, err)
+		}
+	}
 
-    _, err := conn.Do("DEL", iter.key)
-    if err != nil {
-        out.Debug("Redis error from key %s: %v", iter.key, err)
-    }
+	_, err := conn.Do("DEL", iter.key)
+	if err != nil {
+		out.Debug("Redis error from key %s: %v", iter.key, err)
+	}
 }
 
 func ClearTransientSessions(pool *redis.Pool) {
 	conn := pool.Get()
 	defer conn.Close()
 
-    iter := redisSetIterator{
-        conn: conn,
-        key: "transient_sessionids",
-        cursor: -1,
-    }
+	iter := redisSetIterator{
+		conn:   conn,
+		key:    "transient_sessionids",
+		cursor: -1,
+	}
 
-    for iter.Next() {
+	for iter.Next() {
 		id := ID(iter.Int64())
 		removeSession(conn, id)
 	}
 
 	_, err := conn.Do("DEL", "transient_sessionids")
 	if err != nil {
-        out.Debug("Redis error from key transient_sessionids: %v", err)
+		out.Debug("Redis error from key transient_sessionids: %v", err)
 	}
 }

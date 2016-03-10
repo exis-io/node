@@ -16,14 +16,14 @@ type MessageType int
 // Verb associated with a message.
 // Example: for a REGISTER message, an agent needs to have permission for verb "r".
 var messageVerb = map[MessageType]string{
-	ERROR: "r",
-	PUBLISH: "p",
-	SUBSCRIBE: "s",
+	ERROR:       "r",
+	PUBLISH:     "p",
+	SUBSCRIBE:   "s",
 	UNSUBSCRIBE: "s",
-	CALL: "c",
-	CANCEL: "c",
-	REGISTER: "r",
-	UNREGISTER: "r",
+	CALL:        "c",
+	CANCEL:      "c",
+	REGISTER:    "r",
+	UNREGISTER:  "r",
 }
 
 func (mt MessageType) New() Message {
@@ -485,8 +485,8 @@ func (msg *Interrupt) MessageType() MessageType {
 }
 
 type HandledMessage struct {
-	Time   time.Time
-	Type   string
+	Time time.Time
+	Type string
 }
 
 func NewHandledMessage(mtype string) *HandledMessage {
@@ -513,18 +513,18 @@ type MessageEffect struct {
 
 func NewMessageEffect(endpoint URI, response string, internalID ID) *MessageEffect {
 	return &MessageEffect{
-		Endpoint: string(endpoint),
-		Response: response,
+		Endpoint:   string(endpoint),
+		Response:   response,
 		InternalID: internalID,
 	}
 }
 
 func NewErrorMessageEffect(endpoint URI, err URI, internalID ID) *MessageEffect {
 	return &MessageEffect{
-		Endpoint: string(endpoint),
-		Response: "Error",
+		Endpoint:   string(endpoint),
+		Response:   "Error",
 		InternalID: internalID,
-		Error: string(err),
+		Error:      string(err),
 	}
 }
 

@@ -4,11 +4,11 @@ package node
 
 import (
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"os"
 	"strconv"
 	"sync"
 	"time"
-	"github.com/garyburd/redigo/redis"
 )
 
 type Node interface {
@@ -39,11 +39,11 @@ type node struct {
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(config *NodeConfig) Node {
 	node := &node{
-		sessions: make(map[ID]*Session),
-		Agent:    NewAgent(),
-		stats:    NewNodeStats(),
-		PermMode: os.Getenv("EXIS_PERMISSIONS"),
-		Config:   config,
+		sessions:  make(map[ID]*Session),
+		Agent:     NewAgent(),
+		stats:     NewNodeStats(),
+		PermMode:  os.Getenv("EXIS_PERMISSIONS"),
+		Config:    config,
 		RedisPool: NewRedisPool(config.RedisServer, config.RedisPassword),
 	}
 
@@ -215,9 +215,9 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	handled := NewHandledMessage("Hello")
 
 	sess := Session{
-		Peer: client,
+		Peer:          client,
 		messageCounts: make(map[string]int64),
-		kill: make(chan URI, 1),
+		kill:          make(chan URI, 1),
 	}
 
 	// Dont accept new sessions if the node is going down
@@ -339,7 +339,7 @@ func (n *node) SessionClose(sess *Session) {
 func (n *node) SendJoinNotification(sess *Session) {
 	args := []interface{}{}
 	kwargs := map[string]interface{}{
-		"id": sess.Id,
+		"id":    sess.Id,
 		"agent": string(sess.pdid),
 	}
 
@@ -348,9 +348,9 @@ func (n *node) SendJoinNotification(sess *Session) {
 	// Note: we are not using the agent to publish these messages because the
 	// agent itself triggers a sessionJoined message.
 	msg := &Publish{
-		Request: NewID(),
-		Topic: URI(endpoint),
-		Arguments: args,
+		Request:     NewID(),
+		Topic:       URI(endpoint),
+		Arguments:   args,
 		ArgumentsKw: kwargs,
 	}
 	n.Broker.Publish(nil, msg)
@@ -360,20 +360,20 @@ func (n *node) SendJoinNotification(sess *Session) {
 // If "xs.a.b" leaves, the message is published to "x.a/sessionLeft".
 func (n *node) SendLeaveNotification(sess *Session) {
 	args := []interface{}{
-        string(sess.pdid),
-    }
+		string(sess.pdid),
+	}
 
 	kwargs := map[string]interface{}{
-		"id": sess.Id,
+		"id":    sess.Id,
 		"agent": string(sess.pdid),
 	}
 
 	endpoint := popDomain(string(sess.pdid)) + "/sessionLeft"
 
 	msg := &Publish{
-		Request: NewID(),
-		Topic: URI(endpoint),
-		Arguments: args,
+		Request:     NewID(),
+		Topic:       URI(endpoint),
+		Arguments:   args,
 		ArgumentsKw: kwargs,
 	}
 	n.Broker.Publish(nil, msg)
@@ -408,7 +408,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	var effect *MessageEffect
 
 	n.LogMessage(msg, sess)
-
 
 	// Extract the target domain from the message
 	target, err := destination(msg)

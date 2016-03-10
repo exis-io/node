@@ -18,8 +18,8 @@ import (
 
 const (
 	defaultAuthTimeout = 2 * time.Minute
-	defaultNonceSize = 32
-	defaultHashMethod = "sha512"
+	defaultNonceSize   = 32
+	defaultHashMethod  = "sha512"
 )
 
 // Holds stored certificates, contacts the auth appliance, etc
@@ -31,10 +31,10 @@ type Authen struct {
 }
 
 func NewAuthen(node *node) Authen {
-	authen := Authen {
+	authen := Authen{
 		CRAuthenticators: make(map[string]CRAuthenticator),
-		AuthTimeout: defaultAuthTimeout,
-		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
+		AuthTimeout:      defaultAuthTimeout,
+		AuthMode:         os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
 	agent := node.agent
@@ -259,7 +259,6 @@ type Authenticator interface {
 	Authenticate(details map[string]interface{}) (map[string]interface{}, error)
 }
 
-
 //
 // Token Authenticator
 //
@@ -304,7 +303,7 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 
 func NewTokenAuthenticator(agent *Client, authName string) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
-		agent: agent,
+		agent:    agent,
 		authName: authName,
 	}
 	return authenticator
@@ -405,7 +404,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 
 func NewSignatureAuthenticator(agent *Client, authName string) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
-		agent: agent,
+		agent:    agent,
 		authName: authName,
 	}
 	return authenticator

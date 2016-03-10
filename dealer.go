@@ -3,10 +3,10 @@ package node
 import (
 	// "reflect"
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"strings"
 	"sync"
 	"time"
-	"github.com/garyburd/redigo/redis"
 )
 
 // A Dealer routes and manages RPC calls to callees.
@@ -111,12 +111,12 @@ type defaultDealer struct {
 	// Map procedure URIs to lists of channels that are blocked waiting for
 	// registrations on those URIs.  See the comment for the
 	// waitForRegistration flag.
-	blockedCalls        map[URI]map[Sender]chan bool
+	blockedCalls map[URI]map[Sender]chan bool
 
 	// Protect requests and blockedCalls maps.
-	requestMutex        sync.Mutex
+	requestMutex sync.Mutex
 
-	holdTimeout         time.Duration
+	holdTimeout time.Duration
 }
 
 func (d *defaultDealer) Register(callee *Session, msg *Register) *MessageEffect {
@@ -345,13 +345,13 @@ func (d *defaultDealer) Call(caller Sender, msg *Call) *MessageEffect {
 			d.registrationMutex.RUnlock()
 
 			out.Warning("Hold already in progress for %s from %s", msg.Procedure,
-					caller)
+				caller)
 
 			caller.Send(&Error{
 				Type:    msg.MessageType(),
 				Request: msg.Request,
 				Details: make(map[string]interface{}),
-				Error: ErrInternalError,
+				Error:   ErrInternalError,
 			})
 
 			return NewErrorMessageEffect(msg.Procedure, ErrInternalError, 0)
@@ -534,7 +534,6 @@ func (d *defaultDealer) hasRegistration(s URI) bool {
 	return exists && holder.HasHandler()
 }
 
-
 //
 // Redis data structures:
 //
@@ -565,16 +564,16 @@ type redisDealer struct {
 	// Map procedure URIs to lists of channels that are blocked waiting for
 	// registrations on those URIs.  See the comment for the
 	// waitForRegistration flag.
-	blockedCalls        map[URI]map[Sender]chan bool
+	blockedCalls map[URI]map[Sender]chan bool
 
 	// Protect requests and blockedCalls maps.
-	requestMutex        sync.Mutex
+	requestMutex sync.Mutex
 
-	holdTimeout         time.Duration
+	holdTimeout time.Duration
 }
 
 func NewRedisDealer(node *node) Dealer {
-	return &redisDealer {
+	return &redisDealer{
 		node:                node,
 		waitForRegistration: true,
 		requests:            make(map[ID]OutstandingRequest),
@@ -584,70 +583,70 @@ func NewRedisDealer(node *node) Dealer {
 }
 
 type registrationInfo struct {
-	ID        int64 `redis:"id"`
-	SessionID int64 `redis:"sessionid"`
-	Endpoint  string `redis:"endpoint"`
-	PassDetails bool `redis:"details"`
+	ID          int64  `redis:"id"`
+	SessionID   int64  `redis:"sessionid"`
+	Endpoint    string `redis:"endpoint"`
+	PassDetails bool   `redis:"details"`
 }
 
 type registrationIterator struct {
 	conn   redis.Conn
-    key    string
-    cursor int
-    values []string
+	key    string
+	cursor int
+	values []string
 }
 
 func storeRegistration(pool *redis.Pool, endpoint URI, session ID, registration ID, details bool) error {
-    conn := pool.Get()
-    defer conn.Close()
+	conn := pool.Get()
+	defer conn.Close()
 
-    var result error = nil
+	var result error = nil
 
-    registrationKey := fmt.Sprintf("registration:%x:%x", session, registration)
-    args := []interface{}{
-        registrationKey,
-        "id", int64(registration),
-        "sessionid", int64(session),
-        "endpoint", string(endpoint),
+	registrationKey := fmt.Sprintf("registration:%x:%x", session, registration)
+	args := []interface{}{
+		registrationKey,
+		"id", int64(registration),
+		"sessionid", int64(session),
+		"endpoint", string(endpoint),
 		"details", details,
-    }
+	}
 
-    _, err := conn.Do("HMSET", args...)
-    if err != nil {
+	_, err := conn.Do("HMSET", args...)
+	if err != nil {
 		out.Debug("Redis error on key %s: %v", registrationKey, err)
-        result = err
-    }
+		result = err
+	}
 
 	// For now, set priority to registration time so that newer registrations
-    // override older ones.
-    // TODO: allow caller to set a priority, and put those in the higher bits
-    // so that time still breaks ties.
+	// override older ones.
+	// TODO: allow caller to set a priority, and put those in the higher bits
+	// so that time still breaks ties.
 	priority := time.Now().Unix()
 
 	proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
-    _, err = conn.Do("ZADD", proceduresKey, priority, registrationKey)
-    if err != nil {
+	_, err = conn.Do("ZADD", proceduresKey, priority, registrationKey)
+	if err != nil {
 		out.Debug("Redis error on key %s: %v", proceduresKey, err)
-        result = err
-    }
+		result = err
+	}
 
-    registeredKey := fmt.Sprintf("registered:%x", session)
-    _, err = conn.Do("SADD", registeredKey, registrationKey)
-    if err != nil {
+	registeredKey := fmt.Sprintf("registered:%x", session)
+	_, err = conn.Do("SADD", registeredKey, registrationKey)
+	if err != nil {
 		out.Debug("Redis error on key %s: %v", registeredKey, err)
-        result = err
-    }
+		result = err
+	}
 
-    return result
+	return result
 }
 
 func removeRegistration(pool *redis.Pool, session ID, registration ID) error {
-    conn := pool.Get()
-    defer conn.Close()
+	conn := pool.Get()
+	defer conn.Close()
 
-    var result error = nil
+	var result error = nil
 
-    registrationKey := fmt.Sprintf("registration:%x:%x", session, registration)
+	registrationKey := fmt.Sprintf("registration:%x:%x", session, registration)
 
 	endpoint, err := redis.String(conn.Do("HGET", registrationKey, "endpoint"))
 	if err != nil {
@@ -658,18 +657,18 @@ func removeRegistration(pool *redis.Pool, session ID, registration ID) error {
 	}
 
 	proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
-    _, err = conn.Do("ZREM", proceduresKey, registrationKey)
-    if err != nil {
+	_, err = conn.Do("ZREM", proceduresKey, registrationKey)
+	if err != nil {
 		out.Debug("Redis error on key %s: %v", proceduresKey, err)
-        result = err
-    }
+		result = err
+	}
 
-    registeredKey := fmt.Sprintf("registered:%x", session)
-    _, err = conn.Do("SREM", registeredKey, registrationKey)
-    if err != nil {
+	registeredKey := fmt.Sprintf("registered:%x", session)
+	_, err = conn.Do("SREM", registeredKey, registrationKey)
+	if err != nil {
 		out.Debug("Redis error on key %s: %v", registeredKey, err)
-        result = err
-    }
+		result = err
+	}
 
 	_, err = conn.Do("DEL", registrationKey)
 	if err != nil {
@@ -677,12 +676,12 @@ func removeRegistration(pool *redis.Pool, session ID, registration ID) error {
 		result = err
 	}
 
-    return result
+	return result
 }
 
 func getProcedure(pool *redis.Pool, endpoint URI) *registrationInfo {
-    conn := pool.Get()
-    defer conn.Close()
+	conn := pool.Get()
+	defer conn.Close()
 
 	proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
 	procedures, err := redis.Strings(conn.Do("ZREVRANGE", proceduresKey, 0, 1))
@@ -860,13 +859,13 @@ func (d *redisDealer) Call(caller Sender, msg *Call) *MessageEffect {
 			d.requestMutex.Unlock()
 
 			out.Warning("Hold already in progress for %s from %s", msg.Procedure,
-					caller)
+				caller)
 
 			caller.Send(&Error{
 				Type:    msg.MessageType(),
 				Request: msg.Request,
 				Details: make(map[string]interface{}),
-				Error: ErrInternalError,
+				Error:   ErrInternalError,
 			})
 
 			return NewErrorMessageEffect(msg.Procedure, ErrInternalError, 0)
@@ -985,8 +984,8 @@ func (d *redisDealer) Error(peer Sender, msg *Error) *MessageEffect {
 // agent(s) who registered the endpoint will not be informed that their
 // registration has been removed from the node.
 func (d *redisDealer) UnregisterAll(endpoint URI) int {
-    conn := d.node.RedisPool.Get()
-    defer conn.Close()
+	conn := d.node.RedisPool.Get()
+	defer conn.Close()
 
 	proceduresKey := fmt.Sprintf("procedures:%s", endpoint)
 	procedures, err := redis.Strings(conn.Do("ZREVRANGE", proceduresKey, 0, -1))

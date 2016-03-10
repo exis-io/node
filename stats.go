@@ -19,8 +19,8 @@ type NodeStats struct {
 }
 
 type MessageLog struct {
-	path  string
-	file  *os.File
+	path string
+	file *os.File
 
 	write chan string
 
@@ -30,8 +30,8 @@ type MessageLog struct {
 
 func NewNodeStats() *NodeStats {
 	stats := &NodeStats{
-		startTime: int64(time.Now().Unix()),
-		messages: make(chan string, 1024),
+		startTime:     int64(time.Now().Unix()),
+		messages:      make(chan string, 1024),
 		messageCounts: make(map[string]int64, 0),
 	}
 	go stats.CountEventsRoutine()
@@ -106,14 +106,14 @@ func (log *MessageLog) rotate() error {
 
 func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *MessageEffect) {
 	event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s\n",
-			msg.Time.Unix(), msg.Time.Nanosecond(),
-			msg.Type,
-			sess.authid,
-			sess.pdid,
-			effect.Endpoint,
-			effect.InternalID,
-			effect.Response,
-			effect.Error)
+		msg.Time.Unix(), msg.Time.Nanosecond(),
+		msg.Type,
+		sess.authid,
+		sess.pdid,
+		effect.Endpoint,
+		effect.InternalID,
+		effect.Response,
+		effect.Error)
 
 	if stats.MessageLog.write != nil {
 		stats.MessageLog.write <- event

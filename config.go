@@ -43,8 +43,8 @@ func LoadConfig(path string) (*NodeConfig, error) {
 	config.Servers = []ServerConfig{
 		ServerConfig{
 			Certificate: "",
-			Key: "",
-			Port: 8000,
+			Key:         "",
+			Port:        8000,
 		},
 	}
 	config.RedisServer = ""

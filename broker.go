@@ -2,9 +2,9 @@ package node
 
 import (
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"sync"
 	"time"
-	"github.com/garyburd/redigo/redis"
 )
 
 // A broker handles routing EVENTS from Publishers to Subscribers.
@@ -23,7 +23,7 @@ type Broker interface {
 type defaultBroker struct {
 	node *node
 
-	routes        map[URI]map[ID]Sender
+	routes map[URI]map[ID]Sender
 
 	// Keep track of subscriptions by session, so that we can clean up when the
 	// session closes.  For each session, we have a map[ID]URI, which maps
@@ -156,17 +156,16 @@ func (br *defaultBroker) Unsubscribe(sub *Session, msg *Unsubscribe) *MessageEff
 func (br *defaultBroker) lostSession(sess *Session) {
 	br.subMutex.Lock()
 
-	for id, topic := range(br.subscriptions[sess]) {
+	for id, topic := range br.subscriptions[sess] {
 		out.Debug("Unsubscribe: %s from %s", sess, string(topic))
 		delete(br.subscriptions[sess], id)
 		delete(br.routes[topic], id)
 	}
 
-    delete(br.subscriptions, sess)
+	delete(br.subscriptions, sess)
 
 	br.subMutex.Unlock()
 }
-
 
 //
 // Redis data structures:
@@ -182,27 +181,27 @@ type heldEvent struct {
 }
 
 type eventQueueKey struct {
-	session ID
+	session  ID
 	endpoint URI
 }
 
 type redisBroker struct {
 	node *node
 
-	heldEvents map[eventQueueKey][]heldEvent
+	heldEvents  map[eventQueueKey][]heldEvent
 	eventsMutex sync.Mutex
 }
 
 func NewRedisBroker(node *node) Broker {
 	return &redisBroker{
-		node: node,
+		node:       node,
 		heldEvents: make(map[eventQueueKey][]heldEvent),
 	}
 }
 
 type subscriptionInfo struct {
-	ID        int64 `redis:"id"`
-	SessionID int64 `redis:"sessionid"`
+	ID        int64  `redis:"id"`
+	SessionID int64  `redis:"sessionid"`
 	Endpoint  string `redis:"endpoint"`
 }
 
@@ -254,8 +253,8 @@ func (iter *subscriptionIterator) Close() {
 // Returns an iterator.  Be sure to call Close when done with the iterator!
 func GetSubscriptions(pool *redis.Pool, endpoint URI) *subscriptionIterator {
 	iter := &subscriptionIterator{
-		conn: pool.Get(),
-		key: fmt.Sprintf("subscribers:%s", endpoint),
+		conn:   pool.Get(),
+		key:    fmt.Sprintf("subscribers:%s", endpoint),
 		cursor: -1,
 	}
 	return iter
@@ -368,7 +367,7 @@ func (br *redisBroker) holdEvent(event *Event, session ID, endpoint URI) {
 	defer br.eventsMutex.Unlock()
 
 	key := eventQueueKey{
-		session: session,
+		session:  session,
 		endpoint: endpoint,
 	}
 
@@ -379,7 +378,7 @@ func (br *redisBroker) holdEvent(event *Event, session ID, endpoint URI) {
 	}
 
 	hevent := heldEvent{
-		event: event,
+		event:   event,
 		expires: time.Now().Unix() + int64(br.node.Config.HoldCalls),
 	}
 
@@ -448,7 +447,7 @@ func (br *redisBroker) Subscribe(sub *Session, msg *Subscribe) *MessageEffect {
 	if sub.resumeFrom != ID(0) {
 		// If there are any held events, send them now.
 		key := eventQueueKey{
-			session: sub.resumeFrom,
+			session:  sub.resumeFrom,
 			endpoint: msg.Topic,
 		}
 
