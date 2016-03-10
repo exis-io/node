@@ -27,6 +27,12 @@ type Session struct {
 	// TODO: Remove once authentication is enabled for all agents.
 	authLevel int
 
+	// Session freezing and resuming
+	// canFreeze: true if the session is capable of being frozen
+	// resumeFrom: non-zero session ID if resuming from a previous session
+	canFreeze bool
+	resumeFrom ID
+
 	messageCounts map[string]int64
 
 	kill chan URI

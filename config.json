@@ -16,10 +16,12 @@
     "Bouncer": "xs.demo.Bouncer",
     "MessageLogFile": "messages.log",
     "MessageLogMaxLines": 12500,
-    "HoldCalls": 300,
+    "HoldCalls": 20,
     "Servers": [{
         "Certificate": null,
         "Key": null,
         "Port": 8000
-    }]
+    }],
+    "RedisServer": "",
+    "RedisPassword": ""
 }

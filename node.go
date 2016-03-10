@@ -28,8 +28,8 @@ type node struct {
 	Dealer
 	Agent
 	agent       *Client
-	sessions    map[ID]Session
-	sessionLock sync.RWMutex
+	sessions    map[ID]*Session
+	sessionLock sync.Mutex
 	stats       *NodeStats
 	PermMode    string
 	Config      *NodeConfig
@@ -39,7 +39,7 @@ type node struct {
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(config *NodeConfig) Node {
 	node := &node{
-		sessions: make(map[ID]Session),
+		sessions: make(map[ID]*Session),
 		Agent:    NewAgent(),
 		stats:    NewNodeStats(),
 		PermMode: os.Getenv("EXIS_PERMISSIONS"),
@@ -48,14 +48,15 @@ func NewNode(config *NodeConfig) Node {
 	}
 
 	if config.RedisServer == "" {
-		fmt.Println("Redis: DISABLED")
+		out.Debug("Redis: DISABLED")
 		node.Broker = NewDefaultBroker(node)
+		node.Dealer = NewDefaultDealer(node)
 	} else {
-		fmt.Printf("Redis: %s\n", config.RedisServer)
+		out.Debug("Redis: %s", config.RedisServer)
+		ClearTransientSessions(node.RedisPool)
 		node.Broker = NewRedisBroker(node)
+		node.Dealer = NewRedisDealer(node)
 	}
-
-	node.Dealer = NewDefaultDealer(node)
 
 	// Open a file for logging messages.
 	// Note: this must come before we set up the local agent.
@@ -91,16 +92,12 @@ func (node *node) Close() error {
 	node.closeLock.Unlock()
 
 	// Tell all sessions wer're going down
-	// sessions must be locked before access, read is ok here
-	node.sessionLock.RLock()
+	// sessions must be locked before access
+	node.sessionLock.Lock()
 	for _, s := range node.sessions {
 		s.kill <- ErrSystemShutdown
 	}
-	node.sessionLock.RUnlock()
-
-	// Clear the map (might not be needed)
-	node.sessionLock.Lock()
-	node.sessions = make(map[ID]Session)
+	node.sessions = make(map[ID]*Session)
 	node.sessionLock.Unlock()
 
 	return nil
@@ -172,7 +169,6 @@ func (n *node) assignSessionID(authid string, domain string, authextra map[strin
 		return NewID(), nil
 	}
 
-	fmt.Printf("authextra: %v\n", authextra)
 	sessionID, ok := authextra["sessionID"].(string)
 	if ok {
 		tmpID, err := strconv.ParseInt(sessionID, 0, 64)
@@ -191,6 +187,27 @@ func (n *node) assignSessionID(authid string, domain string, authextra map[strin
 
 	newID, err := NewSessionID(n.RedisPool, domain)
 	return newID, err
+}
+
+func (n *node) handleExtraFields(sess *Session, extra map[string]interface{}) error {
+	_, hasGuardian := extra["guardianDomain"]
+	_, hasGuardianID := extra["guardianID"]
+	sess.canFreeze = hasGuardian && hasGuardianID
+
+	tmp, hasResume := extra["resumeFrom"].(string)
+	if hasResume {
+		tmpID, err := strconv.ParseInt(tmp, 0, 64)
+		if err != nil {
+			return fmt.Errorf("Error parsing resume ID (%s)", tmp)
+		}
+
+		resumeID := ID(tmpID)
+		if ResumeSessionPermitted(n.RedisPool, resumeID, sess.authid) {
+			sess.resumeFrom = resumeID
+		}
+	}
+
+	return nil
 }
 
 // Handle a new Peer, creating and returning a session
@@ -253,9 +270,11 @@ func (n *node) Handshake(client Peer) (Session, error) {
 		logErr(client.Close())
 		return sess, AuthenticationError(err.Error())
 	}
+	sess.Id = welcome.Id
 
+	n.handleExtraFields(&sess, authextra)
 	if n.SupportFrozenSessions() {
-		StoreSessionDetails(n.RedisPool, welcome.Id, authextra)
+		StoreSessionDetails(n.RedisPool, &sess, authextra)
 	}
 
 	if welcome.Details == nil {
@@ -274,9 +293,8 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	out.Notice("Session open: %s", string(hello.Realm))
-	sess.Id = welcome.Id
 	n.sessionLock.Lock()
-	n.sessions[sess.Id] = sess
+	n.sessions[sess.Id] = &sess
 	n.sessionLock.Unlock()
 
 	// Note: we are ignoring the CR exchange and just logging it as a
@@ -294,6 +312,12 @@ func (n *node) SessionClose(sess *Session) {
 
 	n.Dealer.lostSession(sess)
 	n.Broker.lostSession(sess)
+
+	// If this is an ordinary session, then clear all subscriptions and
+	// registrations now.
+	if !sess.canFreeze && n.Config.RedisServer != "" {
+		RedisRemoveSession(n.RedisPool, sess.Id)
+	}
 
 	n.stats.LogEvent("SessionClose")
 
@@ -338,7 +362,7 @@ func (n *node) SendLeaveNotification(sess *Session) {
 	args := []interface{}{
         string(sess.pdid),
     }
-    
+
 	kwargs := map[string]interface{}{
 		"id": sess.Id,
 		"agent": string(sess.pdid),
@@ -434,7 +458,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			return
 		}
 	}
-
 
 	switch msg := (*msg).(type) {
 	case *Goodbye:
@@ -590,6 +613,14 @@ func (r *node) SupportFrozenSessions() bool {
 	return r.Config.RedisServer != ""
 }
 
+func (r *node) GetSession(session ID) (*Session, bool) {
+	r.sessionLock.Lock()
+	defer r.sessionLock.Unlock()
+
+	s, ok := r.sessions[session]
+	return s, ok
+}
+
 ////////////////////////////////////////
 // Misc and old
 ////////////////////////////////////////
@@ -598,7 +629,7 @@ func (n *node) localClient(s string) *Client {
 	p := n.getTestPeer()
 
 	client := NewClient(p)
-	client.ReceiveTimeout = 5 * time.Second
+	client.ReceiveTimeout = 60 * time.Second
 	if _, err := client.JoinRealm(s, nil); err != nil {
 		out.Error("Error when creating new client: ", err)
 	}

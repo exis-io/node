@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"sync"
+	"time"
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -175,13 +176,27 @@ func (br *defaultBroker) lostSession(sess *Session) {
 // subscribed:<session_id> -> set of subscription:<session_id>:<subscription_id>
 //
 
+type heldEvent struct {
+	event   *Event
+	expires int64
+}
+
+type eventQueueKey struct {
+	session ID
+	endpoint URI
+}
+
 type redisBroker struct {
 	node *node
+
+	heldEvents map[eventQueueKey][]heldEvent
+	eventsMutex sync.Mutex
 }
 
 func NewRedisBroker(node *node) Broker {
 	return &redisBroker{
 		node: node,
+		heldEvents: make(map[eventQueueKey][]heldEvent),
 	}
 }
 
@@ -217,7 +232,7 @@ func (iter *subscriptionIterator) Next() bool {
 			iter.cursor = 0
 		}
 
-		arr, err := redis.MultiBulk(iter.conn.Do("SSCAN", iter.key, iter.cursor))
+		arr, err := redis.Values(iter.conn.Do("SSCAN", iter.key, iter.cursor))
 		if err != nil {
 			return false
 		}
@@ -322,6 +337,55 @@ func RemoveSubscription(pool *redis.Pool, session ID, subscription ID) error {
 	return result
 }
 
+func (br *redisBroker) purgeEvent(key eventQueueKey) {
+	timeout := int64(br.node.Config.HoldCalls)
+
+	// As long as there are entries remaining in the endpoint's heldEvents
+	// queue, this routine will walk through them and delete them one by one as
+	// they expire.
+	remaining := true
+	for remaining {
+		if timeout > 0 {
+			time.Sleep(time.Duration(timeout) * time.Second)
+		}
+
+		br.eventsMutex.Lock()
+		if len(br.heldEvents[key]) > 0 {
+			br.heldEvents[key] = br.heldEvents[key][1:]
+		}
+		if len(br.heldEvents[key]) > 0 {
+			// Compute the time until next expiration.
+			timeout = br.heldEvents[key][0].expires - time.Now().Unix()
+		} else {
+			remaining = false
+		}
+		br.eventsMutex.Unlock()
+	}
+}
+
+func (br *redisBroker) holdEvent(event *Event, session ID, endpoint URI) {
+	br.eventsMutex.Lock()
+	defer br.eventsMutex.Unlock()
+
+	key := eventQueueKey{
+		session: session,
+		endpoint: endpoint,
+	}
+
+	if len(br.heldEvents[key]) == 0 {
+		// This is the first held event for the endpoint,
+		// so schedule a worker to delete it later.
+		go br.purgeEvent(key)
+	}
+
+	hevent := heldEvent{
+		event: event,
+		expires: time.Now().Unix() + int64(br.node.Config.HoldCalls),
+	}
+
+	br.heldEvents[key] = append(br.heldEvents[key], hevent)
+}
+
 // Publish sends a message to all subscribed clients except for the sender.
 //
 // If msg.Options["acknowledge"] == true, the publisher receives a Published event
@@ -340,14 +404,15 @@ func (br *redisBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 	for iter.Next() {
 		sub := iter.Value()
 
-		out.Debug("Send to %x\n", sub.SessionID)
-
-		receiver, ok := br.node.sessions[ID(sub.SessionID)]
+		receiver, ok := br.node.GetSession(ID(sub.SessionID))
 		if ok {
 			// shallow-copy the template
 			event := evtTemplate
 			event.Subscription = ID(sub.ID)
 			receiver.Send(&event)
+		} else {
+			br.holdEvent(&evtTemplate, ID(sub.SessionID), msg.Topic)
+			go ThawSession(br.node.RedisPool, br.node.agent, ID(sub.SessionID))
 		}
 	}
 	iter.Close()
@@ -380,6 +445,25 @@ func (br *redisBroker) Subscribe(sub *Session, msg *Subscribe) *MessageEffect {
 
 	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
 
+	if sub.resumeFrom != ID(0) {
+		// If there are any held events, send them now.
+		key := eventQueueKey{
+			session: sub.resumeFrom,
+			endpoint: msg.Topic,
+		}
+
+		br.eventsMutex.Lock()
+		defer br.eventsMutex.Unlock()
+
+		for _, hevent := range br.heldEvents[key] {
+			event := hevent.event
+			event.Subscription = id
+			sub.Send(event)
+		}
+
+		delete(br.heldEvents, key)
+	}
+
 	return NewMessageEffect(msg.Topic, "Subscribed", id)
 }
 
@@ -402,39 +486,4 @@ func (br *redisBroker) Unsubscribe(sub *Session, msg *Unsubscribe) *MessageEffec
 
 // Remove all the subs for a session that has disconected
 func (br *redisBroker) lostSession(sess *Session) {
-	conn := br.node.RedisPool.Get()
-	defer conn.Close()
-
-	// Leverage the iterator code to walk the subscriptions for a session
-	// rather than endpoint.
-	// Do not close the iterator because we will close the connection later.
-	iter := &subscriptionIterator{
-		conn: conn,
-		key: fmt.Sprintf("subscribed:%x", sess.Id),
-		cursor: -1,
-	}
-
-	for iter.Next() {
-		sub := iter.Value()
-
-		out.Debug("Unsubscribe: %s from %s", sess, sub.Endpoint)
-
-		subscriptionKey := fmt.Sprintf("subscription:%x:%x", sub.SessionID, sub.ID)
-
-		subscribersKey := fmt.Sprintf("subscribers:%s", sub.Endpoint)
-		_, err := conn.Do("SREM", subscribersKey, subscriptionKey)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		_, err = conn.Do("DEL", subscriptionKey)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
-
-	_, err := conn.Do("DEL", iter.key)
-	if err != nil {
-		fmt.Println(err)
-	}
 }
