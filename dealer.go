@@ -839,7 +839,7 @@ func (d *redisDealer) Call(caller Sender, msg *Call) *MessageEffect {
 		// If not, hold the call while we attempt to thaw it.
 		receiver, ok = d.node.GetSession(ID(proc.SessionID))
 		if !ok {
-			go ThawSession(d.node.RedisPool, d.node.agent, ID(proc.SessionID))
+			go ThawSession(d.node.RedisPool, d.node, ID(proc.SessionID))
 		}
 	}
 

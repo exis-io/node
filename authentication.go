@@ -268,7 +268,6 @@ type Authenticator interface {
 
 type TokenAuthenticator struct {
 	node     *node
-	agent    *Client
 	authName string
 }
 
@@ -278,6 +277,9 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
+
+	agent := ta.node.localClient("xs")
+	defer agent.Close()
 
 	for _, auth := range ancestorDomains(authid, ta.authName) {
 		authEndpoint := auth + "/check_token_1"
@@ -291,7 +293,7 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 
 		// Verify the token with auth.
 		args := []interface{}{authid, authenticate.Signature}
-		ret, err := ta.agent.Call(authEndpoint, args, nil)
+		ret, err := agent.Call(authEndpoint, args, nil)
 		if err != nil {
 			continue
 		}
@@ -308,7 +310,6 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 func NewTokenAuthenticator(node *node, authName string) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
 		node:     node,
-		agent:    node.agent,
 		authName: authName,
 	}
 	return authenticator
@@ -374,6 +375,9 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
+		agent := ta.node.localClient("xs")
+		defer agent.Close()
+
 		for _, auth := range ancestorDomains(authid, ta.authName) {
 			authEndpoint := auth + "/get_appliance_key"
 
@@ -383,7 +387,7 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 			}
 
 			out.Debug("Asking %s for public key of %s", auth, authid)
-			ret, err := ta.agent.Call(authEndpoint, args, nil)
+			ret, err := agent.Call(authEndpoint, args, nil)
 			if err != nil {
 				continue
 			}
@@ -416,7 +420,6 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 func NewSignatureAuthenticator(node *node, authName string) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
 		node:     node,
-		agent:    node.agent,
 		authName: authName,
 	}
 	return authenticator

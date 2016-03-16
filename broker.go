@@ -411,7 +411,7 @@ func (br *redisBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 			receiver.Send(&event)
 		} else {
 			br.holdEvent(&evtTemplate, ID(sub.SessionID), msg.Topic)
-			go ThawSession(br.node.RedisPool, br.node.agent, ID(sub.SessionID))
+			go ThawSession(br.node.RedisPool, br.node, ID(sub.SessionID))
 		}
 	}
 	iter.Close()

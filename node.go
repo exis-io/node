@@ -543,8 +543,11 @@ func (n *node) AskBouncer(authid string, target string, verb string) bool {
 		return false
 	}
 
+	agent := n.localClient("xs")
+	defer agent.Close()
+
 	args := []interface{}{authid, target, verb}
-	ret, err := n.agent.Call(checkPerm, args, nil)
+	ret, err := agent.Call(checkPerm, args, nil)
 	if err != nil {
 		out.Critical("Error, returning false: %s", err)
 		return false
