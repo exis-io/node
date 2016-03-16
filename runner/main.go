@@ -42,6 +42,19 @@ func checkEnv() {
 	}
 }
 
+func runHTTPServer(handler *node.WebsocketServer, config node.ServerConfig) {
+	server := &http.Server{
+		Handler: handler,
+		Addr:    fmt.Sprintf(":%d", config.Port),
+	}
+
+	if config.Certificate != "" && config.Key != "" {
+		log.Fatal(server.ListenAndServeTLS(config.Certificate, config.Key))
+	} else {
+		log.Fatal(server.ListenAndServe())
+	}
+}
+
 func main() {
 	node.Log()
 
@@ -54,17 +67,23 @@ func main() {
 	// Pass certificate here
 	s := node.CreateNode(config)
 
-	server := &http.Server{
-		Handler: s,
-		Addr:    ":8000",
-	}
+	if len(config.Servers) == 0 {
+		// Old config uses environment variables to get certificate and key
+		// path and is hard-coded to port 8000.
+		serverConfig := node.ServerConfig{
+			Certificate: os.Getenv("EXIS_CERT"),
+			Key: os.Getenv("EXIS_KEY"),
+			Port: 8000,
+		}
 
-	certFile := os.Getenv("EXIS_CERT")
-	keyFile := os.Getenv("EXIS_KEY")
-
-	if certFile != "" && keyFile != "" {
-		log.Fatal(server.ListenAndServeTLS(certFile, keyFile))
+		runHTTPServer(s, serverConfig)
 	} else {
-		log.Fatal(server.ListenAndServe())
+		for i, serverConfig := range(config.Servers) {
+			if i+1 < len(config.Servers) {
+				go runHTTPServer(s, serverConfig)
+			} else {
+				runHTTPServer(s, serverConfig)
+			}
+		}
 	}
 }

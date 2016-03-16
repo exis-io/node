@@ -10,7 +10,7 @@ type Limiter interface {
 }
 
 type BasicLimiter struct {
-	limit  int
+	limit int
 
 	available   int
 	windowStart int64
@@ -20,8 +20,8 @@ type BasicLimiter struct {
 
 func NewBasicLimiter(limit int) BasicLimiter {
 	limiter := BasicLimiter{
-		limit: limit,
-		available: limit,
+		limit:       limit,
+		available:   limit,
 		windowStart: time.Now().Unix(),
 	}
 	return limiter

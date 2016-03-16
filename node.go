@@ -4,7 +4,9 @@ package node
 
 import (
 	"fmt"
+	"github.com/garyburd/redigo/redis"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -14,6 +16,8 @@ type Node interface {
 	Listen(*Session)
 	Close() error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
+
+	SupportFrozenSessions() bool
 }
 
 type node struct {
@@ -24,23 +28,34 @@ type node struct {
 	Dealer
 	Agent
 	agent       *Client
-	sessions    map[string]Session
-	sessionLock sync.RWMutex
+	sessions    map[ID]*Session
+	sessionLock sync.Mutex
 	stats       *NodeStats
 	PermMode    string
 	Config      *NodeConfig
+	RedisPool   *redis.Pool
 }
 
 // NewDefaultNode creates a very basic WAMP Node.
 func NewNode(config *NodeConfig) Node {
 	node := &node{
-		sessions: make(map[string]Session, 0),
-		Broker:   NewDefaultBroker(),
-		Dealer:   NewDefaultDealer(),
-		Agent:    NewAgent(),
-		stats:    NewNodeStats(),
-		PermMode: os.Getenv("EXIS_PERMISSIONS"),
-		Config:   config,
+		sessions:  make(map[ID]*Session),
+		Agent:     NewAgent(),
+		stats:     NewNodeStats(),
+		PermMode:  os.Getenv("EXIS_PERMISSIONS"),
+		Config:    config,
+		RedisPool: NewRedisPool(config.RedisServer, config.RedisPassword),
+	}
+
+	if config.RedisServer == "" {
+		out.Debug("Redis: DISABLED")
+		node.Broker = NewDefaultBroker(node)
+		node.Dealer = NewDefaultDealer(node)
+	} else {
+		out.Debug("Redis: %s", config.RedisServer)
+		ClearTransientSessions(node.RedisPool)
+		node.Broker = NewRedisBroker(node)
+		node.Dealer = NewRedisDealer(node)
 	}
 
 	// Open a file for logging messages.
@@ -53,7 +68,7 @@ func NewNode(config *NodeConfig) Node {
 	if config.HoldCalls > 0 {
 		go func() {
 			time.Sleep(time.Duration(config.HoldCalls) * time.Second)
-			node.Dealer.ClearBlockedCalls()
+			node.Dealer.SetCallHolding(false)
 		}()
 	}
 
@@ -77,16 +92,12 @@ func (node *node) Close() error {
 	node.closeLock.Unlock()
 
 	// Tell all sessions wer're going down
-	// sessions must be locked before access, read is ok here
-	node.sessionLock.RLock()
+	// sessions must be locked before access
+	node.sessionLock.Lock()
 	for _, s := range node.sessions {
 		s.kill <- ErrSystemShutdown
 	}
-	node.sessionLock.RUnlock()
-
-	// Clear the map (might not be needed)
-	node.sessionLock.Lock()
-	node.sessions = make(map[string]Session, 0)
+	node.sessions = make(map[ID]*Session)
 	node.sessionLock.Unlock()
 
 	return nil
@@ -146,14 +157,67 @@ func (node *node) Listen(sess *Session) {
 	}
 }
 
+// Assign a session ID to a new session.
+//
+// authid: domain of agent according to validated credentials
+// domain: domain requested by the agent, verified subdomain of authid
+// authextra: extra data passed with Hello message
+func (n *node) assignSessionID(authid string, domain string, authextra map[string]interface{}) (ID, error) {
+	// We must have been configured to connect to Redis in order to support
+	// persistent session IDs.
+	if n.Config.RedisServer == "" {
+		return NewID(), nil
+	}
+
+	sessionID, ok := authextra["sessionID"].(string)
+	if ok {
+		tmpID, err := strconv.ParseInt(sessionID, 0, 64)
+		if err != nil {
+			return ID(0), fmt.Errorf("Error parsing session ID (%s)", sessionID)
+		}
+
+		reclaimID := ID(tmpID)
+		err = ReclaimSessionID(n.RedisPool, reclaimID, authid, domain)
+		if err != nil {
+			return ID(0), err
+		}
+
+		return reclaimID, nil
+	}
+
+	newID, err := NewSessionID(n.RedisPool, domain)
+	return newID, err
+}
+
+func (n *node) handleExtraFields(sess *Session, extra map[string]interface{}) error {
+	_, hasGuardian := extra["guardianDomain"]
+	_, hasGuardianID := extra["guardianID"]
+	sess.canFreeze = hasGuardian && hasGuardianID
+
+	tmp, hasResume := extra["resumeFrom"].(string)
+	if hasResume {
+		tmpID, err := strconv.ParseInt(tmp, 0, 64)
+		if err != nil {
+			return fmt.Errorf("Error parsing resume ID (%s)", tmp)
+		}
+
+		resumeID := ID(tmpID)
+		if ResumeSessionPermitted(n.RedisPool, resumeID, sess.authid) {
+			sess.resumeFrom = resumeID
+		}
+	}
+
+	return nil
+}
+
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
 	handled := NewHandledMessage("Hello")
 
 	sess := Session{
-		Peer: client,
+		Peer:          client,
 		messageCounts: make(map[string]int64),
-		kill: make(chan URI, 1),
+		kill:          make(chan URI, 1),
 	}
 
 	// Dont accept new sessions if the node is going down
@@ -186,16 +250,32 @@ func (n *node) Handshake(client Peer) (Session, error) {
 
 	if err != nil {
 		abort := &Abort{
-			Reason:  ErrAuthorizationFailed, // TODO: should this be AuthenticationFailed?
+			Reason:  ErrAuthenticationFailed,
 			Details: map[string]interface{}{"error": err.Error()},
 		}
-
 		logErr(client.Send(abort))
 		logErr(client.Close())
 		return sess, AuthenticationError(err.Error())
 	}
 
-	welcome.Id = NewID()
+	authextra, _ := hello.Details["authextra"].(map[string]interface{})
+
+	welcome.Id, err = n.assignSessionID(sess.authid, string(sess.pdid), authextra)
+	if err != nil {
+		abort := &Abort{
+			Reason:  ErrAuthenticationFailed,
+			Details: map[string]interface{}{"error": err.Error()},
+		}
+		logErr(client.Send(abort))
+		logErr(client.Close())
+		return sess, AuthenticationError(err.Error())
+	}
+	sess.Id = welcome.Id
+
+	n.handleExtraFields(&sess, authextra)
+	if n.SupportFrozenSessions() {
+		StoreSessionDetails(n.RedisPool, &sess, authextra)
+	}
 
 	if welcome.Details == nil {
 		welcome.Details = make(map[string]interface{})
@@ -213,9 +293,8 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	}
 
 	out.Notice("Session open: %s", string(hello.Realm))
-	sess.Id = welcome.Id
 	n.sessionLock.Lock()
-	n.sessions[string(hello.Realm)] = sess
+	n.sessions[sess.Id] = &sess
 	n.sessionLock.Unlock()
 
 	// Note: we are ignoring the CR exchange and just logging it as a
@@ -234,12 +313,18 @@ func (n *node) SessionClose(sess *Session) {
 	n.Dealer.lostSession(sess)
 	n.Broker.lostSession(sess)
 
+	// If this is an ordinary session, then clear all subscriptions and
+	// registrations now.
+	if !sess.canFreeze && n.Config.RedisServer != "" {
+		RedisRemoveSession(n.RedisPool, sess.Id)
+	}
+
 	n.stats.LogEvent("SessionClose")
 
 	n.SendLeaveNotification(sess)
 
 	n.sessionLock.Lock()
-	delete(n.sessions, string(sess.pdid))
+	delete(n.sessions, sess.Id)
 	n.sessionLock.Unlock()
 
 	// We log a special _Close message in case there was no Goodbye message
@@ -254,7 +339,7 @@ func (n *node) SessionClose(sess *Session) {
 func (n *node) SendJoinNotification(sess *Session) {
 	args := []interface{}{}
 	kwargs := map[string]interface{}{
-		"id": sess.Id,
+		"id":    sess.Id,
 		"agent": string(sess.pdid),
 	}
 
@@ -263,9 +348,9 @@ func (n *node) SendJoinNotification(sess *Session) {
 	// Note: we are not using the agent to publish these messages because the
 	// agent itself triggers a sessionJoined message.
 	msg := &Publish{
-		Request: NewID(),
-		Topic: URI(endpoint),
-		Arguments: args,
+		Request:     NewID(),
+		Topic:       URI(endpoint),
+		Arguments:   args,
 		ArgumentsKw: kwargs,
 	}
 	n.Broker.Publish(nil, msg)
@@ -275,20 +360,20 @@ func (n *node) SendJoinNotification(sess *Session) {
 // If "xs.a.b" leaves, the message is published to "x.a/sessionLeft".
 func (n *node) SendLeaveNotification(sess *Session) {
 	args := []interface{}{
-        string(sess.pdid),
-    }
-    
+		string(sess.pdid),
+	}
+
 	kwargs := map[string]interface{}{
-		"id": sess.Id,
+		"id":    sess.Id,
 		"agent": string(sess.pdid),
 	}
 
 	endpoint := popDomain(string(sess.pdid)) + "/sessionLeft"
 
 	msg := &Publish{
-		Request: NewID(),
-		Topic: URI(endpoint),
-		Arguments: args,
+		Request:     NewID(),
+		Topic:       URI(endpoint),
+		Arguments:   args,
 		ArgumentsKw: kwargs,
 	}
 	n.Broker.Publish(nil, msg)
@@ -323,7 +408,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	var effect *MessageEffect
 
 	n.LogMessage(msg, sess)
-
 
 	// Extract the target domain from the message
 	target, err := destination(msg)
@@ -373,7 +457,6 @@ func (n *node) Handle(msg *Message, sess *Session) {
 			return
 		}
 	}
-
 
 	switch msg := (*msg).(type) {
 	case *Goodbye:
@@ -435,22 +518,6 @@ func (n *node) Permitted(endpoint URI, sess *Session, verb string) bool {
 		return true
 	}
 
-	// Look up auth level of receiver.  The action will not be permitted if the
-	// receiver is more strongly authenticated than the caller.
-	//
-	// This code is only for testing interaction with authenticated agents
-	// without breaking unauthenticated agents.
-	//
-	// TODO: Remove this code when all agents are authenticated.
-	targetDomain, _ := extractDomain(string(endpoint))
-	n.sessionLock.RLock()
-	targetSession, ok := n.sessions[targetDomain]
-	n.sessionLock.RUnlock()
-	if ok && targetSession.authLevel > sess.authLevel {
-		out.Warning("Communication with authenticated agent %s not permitted", targetSession.pdid)
-		return false
-	}
-
 	// TODO Check permissions cache: if found, allow
 	// TODO: save a permitted action in some flavor of cache
 
@@ -476,8 +543,11 @@ func (n *node) AskBouncer(authid string, target string, verb string) bool {
 		return false
 	}
 
+	agent := n.localClient("xs")
+	defer agent.Close()
+
 	args := []interface{}{authid, target, verb}
-	ret, err := n.agent.Call(checkPerm, args, nil)
+	ret, err := agent.Call(checkPerm, args, nil)
 	if err != nil {
 		out.Critical("Error, returning false: %s", err)
 		return false
@@ -502,8 +572,8 @@ func (node *node) EvictDomain(domain string) int {
 	node.sessionLock.Lock()
 	defer node.sessionLock.Unlock()
 
-	for dom, sess := range node.sessions {
-		if subdomain(domain, dom) {
+	for _, sess := range node.sessions {
+		if subdomain(domain, string(sess.pdid)) {
 			sess.kill <- ErrSessionEvicted
 			count++
 		}
@@ -539,6 +609,20 @@ var defaultWelcomeDetails = map[string]interface{}{
 	},
 }
 
+// Is support for frozen sessions enabled?
+// Requires external persistence of session information.
+func (r *node) SupportFrozenSessions() bool {
+	return r.Config.RedisServer != ""
+}
+
+func (r *node) GetSession(session ID) (*Session, bool) {
+	r.sessionLock.Lock()
+	defer r.sessionLock.Unlock()
+
+	s, ok := r.sessions[session]
+	return s, ok
+}
+
 ////////////////////////////////////////
 // Misc and old
 ////////////////////////////////////////
@@ -547,7 +631,7 @@ func (n *node) localClient(s string) *Client {
 	p := n.getTestPeer()
 
 	client := NewClient(p)
-	client.ReceiveTimeout = 5 * time.Second
+	client.ReceiveTimeout = 60 * time.Second
 	if _, err := client.JoinRealm(s, nil); err != nil {
 		out.Error("Error when creating new client: ", err)
 	}

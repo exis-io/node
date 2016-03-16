@@ -7,9 +7,9 @@ package node
 
 func (node *node) HandleGetUsage(args []interface{}, kwargs map[string]interface{}, details map[string]interface{}) (result *CallResult) {
 	counts := node.stats.GetUsage()
-	result = &CallResult {
-        Args: []interface{}{counts},
-    }
+	result = &CallResult{
+		Args: []interface{}{counts},
+	}
 	return
 }
 
@@ -21,7 +21,7 @@ func (node *node) HandleEvictDomain(args []interface{}, kwargs map[string]interf
 		count = node.EvictDomain(domain)
 	}
 
-	result = &CallResult {
+	result = &CallResult{
 		Args: []interface{}{count},
 	}
 	return
@@ -35,22 +35,22 @@ func (node *node) HandleUnregisterAll(args []interface{}, kwargs map[string]inte
 		count = node.Dealer.UnregisterAll(URI(endpoint))
 	}
 
-	result = &CallResult {
+	result = &CallResult{
 		Args: []interface{}{count},
 	}
 	return
 }
 
 func (node *node) RegisterNodeMethods() {
-    options := make(map[string]interface{}, 0)
-    endpoint := string(node.agent.pdid + "/getUsage")
-    node.agent.Register(endpoint, node.HandleGetUsage, options)
+	options := make(map[string]interface{}, 0)
+	endpoint := string(node.agent.pdid + "/getUsage")
+	node.agent.Register(endpoint, node.HandleGetUsage, options)
 
-    options = make(map[string]interface{}, 0)
-    endpoint = string(node.agent.pdid + "/evictDomain")
-    node.agent.Register(endpoint, node.HandleEvictDomain, options)
+	options = make(map[string]interface{}, 0)
+	endpoint = string(node.agent.pdid + "/evictDomain")
+	node.agent.Register(endpoint, node.HandleEvictDomain, options)
 
-    options = make(map[string]interface{}, 0)
-    endpoint = string(node.agent.pdid + "/unregisterAll")
-    node.agent.Register(endpoint, node.HandleUnregisterAll, options)
+	options = make(map[string]interface{}, 0)
+	endpoint = string(node.agent.pdid + "/unregisterAll")
+	node.agent.Register(endpoint, node.HandleUnregisterAll, options)
 }

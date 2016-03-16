@@ -5,6 +5,12 @@ import (
 	"io/ioutil"
 )
 
+type ServerConfig struct {
+	Certificate string
+	Key         string
+	Port        int
+}
+
 type NodeConfig struct {
 	Agent              string
 	RequestLimits      [][]interface{}
@@ -13,6 +19,9 @@ type NodeConfig struct {
 	MessageLogFile     string
 	MessageLogMaxLines int
 	HoldCalls          int
+	Servers            []ServerConfig
+	RedisServer        string
+	RedisPassword      string
 }
 
 func LoadConfig(path string) (*NodeConfig, error) {
@@ -23,6 +32,24 @@ func LoadConfig(path string) (*NodeConfig, error) {
 	}
 
 	var config NodeConfig
+
+	// Default values
+	config.Agent = "xs.node"
+	config.AuthName = "Auth"
+	config.Bouncer = "xs.demo.Bouncer"
+	config.MessageLogFile = "messages.log"
+	config.MessageLogMaxLines = 12500
+	config.HoldCalls = 300
+	config.Servers = []ServerConfig{
+		ServerConfig{
+			Certificate: "",
+			Key:         "",
+			Port:        8000,
+		},
+	}
+	config.RedisServer = ""
+	config.RedisPassword = ""
+
 	err = json.Unmarshal(file, &config)
 	if err != nil {
 		out.Critical("Parsing configuration file failed: %s", err)

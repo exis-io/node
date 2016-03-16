@@ -18,13 +18,13 @@ type RegistrationHolder interface {
 
 type SingleRegistrationHolder struct {
 	handler ID
-	isSet bool
+	isSet   bool
 }
 
 func NewSingleRegistrationHolder() *SingleRegistrationHolder {
 	return &SingleRegistrationHolder{
 		handler: 0,
-		isSet: false,
+		isSet:   false,
 	}
 }
 
@@ -67,13 +67,13 @@ func (reg *SingleRegistrationHolder) GetHandler() (ID, bool) {
 
 type MultiRegistrationHolder struct {
 	handlerList []ID
-	handlerSet map[ID]bool
+	handlerSet  map[ID]bool
 }
 
 func NewMultiRegistrationHolder() *MultiRegistrationHolder {
 	return &MultiRegistrationHolder{
 		handlerList: make([]ID, 0),
-		handlerSet: make(map[ID]bool),
+		handlerSet:  make(map[ID]bool),
 	}
 }
 

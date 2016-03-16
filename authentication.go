@@ -18,8 +18,8 @@ import (
 
 const (
 	defaultAuthTimeout = 2 * time.Minute
-	defaultNonceSize = 32
-	defaultHashMethod = "sha512"
+	defaultNonceSize   = 32
+	defaultHashMethod  = "sha512"
 )
 
 // Holds stored certificates, contacts the auth appliance, etc
@@ -31,17 +31,15 @@ type Authen struct {
 }
 
 func NewAuthen(node *node) Authen {
-	authen := Authen {
+	authen := Authen{
 		CRAuthenticators: make(map[string]CRAuthenticator),
-		AuthTimeout: defaultAuthTimeout,
-		AuthMode: os.Getenv("EXIS_AUTHENTICATION"),
+		AuthTimeout:      defaultAuthTimeout,
+		AuthMode:         os.Getenv("EXIS_AUTHENTICATION"),
 	}
 
-	agent := node.agent
 	authName := node.Config.AuthName
-
-	authen.CRAuthenticators["token"] = NewTokenAuthenticator(agent, authName)
-	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(agent, authName)
+	authen.CRAuthenticators["token"] = NewTokenAuthenticator(node, authName)
+	authen.CRAuthenticators["signature"] = NewSignatureAuthenticator(node, authName)
 
 	return authen
 }
@@ -259,7 +257,6 @@ type Authenticator interface {
 	Authenticate(details map[string]interface{}) (map[string]interface{}, error)
 }
 
-
 //
 // Token Authenticator
 //
@@ -270,7 +267,7 @@ type Authenticator interface {
 //
 
 type TokenAuthenticator struct {
-	agent    *Client
+	node     *node
 	authName string
 }
 
@@ -281,14 +278,22 @@ func (ta *TokenAuthenticator) Challenge(details map[string]interface{}) (map[str
 func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, authenticate *Authenticate) (map[string]interface{}, error) {
 	authid := challenge["authid"].(string)
 
-	for _, auth := range ancestorDomains(authid, ta.authName) {
-		out.Debug("Verifying token for %s with %s", authid, auth)
+	agent := ta.node.localClient("xs")
+	defer agent.Close()
 
+	for _, auth := range ancestorDomains(authid, ta.authName) {
 		authEndpoint := auth + "/check_token_1"
+
+		active := ta.node.Dealer.hasRegistration(URI(authEndpoint))
+		if !active {
+			continue
+		}
+
+		out.Debug("Verifying token for %s with %s", authid, auth)
 
 		// Verify the token with auth.
 		args := []interface{}{authid, authenticate.Signature}
-		ret, err := ta.agent.Call(authEndpoint, args, nil)
+		ret, err := agent.Call(authEndpoint, args, nil)
 		if err != nil {
 			continue
 		}
@@ -302,9 +307,9 @@ func (ta *TokenAuthenticator) Authenticate(challenge map[string]interface{}, aut
 	return nil, fmt.Errorf("Unable to verify token with auth")
 }
 
-func NewTokenAuthenticator(agent *Client, authName string) *TokenAuthenticator {
+func NewTokenAuthenticator(node *node, authName string) *TokenAuthenticator {
 	authenticator := &TokenAuthenticator{
-		agent: agent,
+		node:     node,
 		authName: authName,
 	}
 	return authenticator
@@ -324,6 +329,7 @@ func NewTokenAuthenticator(agent *Client, authName string) *TokenAuthenticator {
 //
 
 type SignatureAuthenticator struct {
+	node     *node
 	agent    *Client
 	authName string
 }
@@ -369,11 +375,19 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	if pubkey == nil {
 		args := []interface{}{authid}
 
-		for _, auth := range ancestorDomains(authid, ta.authName) {
-			out.Debug("Asking %s for public key of %s", auth, authid)
+		agent := ta.node.localClient("xs")
+		defer agent.Close()
 
+		for _, auth := range ancestorDomains(authid, ta.authName) {
 			authEndpoint := auth + "/get_appliance_key"
-			ret, err := ta.agent.Call(authEndpoint, args, nil)
+
+			active := ta.node.Dealer.hasRegistration(URI(authEndpoint))
+			if !active {
+				continue
+			}
+
+			out.Debug("Asking %s for public key of %s", auth, authid)
+			ret, err := agent.Call(authEndpoint, args, nil)
 			if err != nil {
 				continue
 			}
@@ -403,9 +417,9 @@ func (ta *SignatureAuthenticator) Authenticate(challenge map[string]interface{},
 	return nil, nil
 }
 
-func NewSignatureAuthenticator(agent *Client, authName string) *SignatureAuthenticator {
+func NewSignatureAuthenticator(node *node, authName string) *SignatureAuthenticator {
 	authenticator := &SignatureAuthenticator{
-		agent: agent,
+		node:     node,
 		authName: authName,
 	}
 	return authenticator
