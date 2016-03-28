@@ -184,7 +184,7 @@ func RedisRemoveSession(pool *redis.Pool, session ID) {
 	removeSession(conn, session)
 }
 
-func ThawSession(pool *redis.Pool, node *node, session ID) error {
+func ThawSession(pool *redis.Pool, agent *Client, session ID) error {
 	// TODO This function should only be fired once even if multiple
 	// messages arrive for the frozen session.
 
@@ -209,9 +209,6 @@ func ThawSession(pool *redis.Pool, node *node, session ID) error {
 		out.Debug("Redis error on key %s: %v", sessionKey, err)
 		return err
 	}
-
-	agent := node.localClient("xs")
-	defer agent.Close()
 
 	args := []interface{}{thawID, int64(session)}
 	result, err := agent.Call(thawEndpoint, args, nil)
