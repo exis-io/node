@@ -22,6 +22,6 @@
         "Key": null,
         "Port": 8000
     }],
-    "RedisServer": ":6379",
+    "RedisServer": "",
     "RedisPassword": ""
 }
