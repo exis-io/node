@@ -504,11 +504,18 @@ func NewHandledMessage(mtype string) *HandledMessage {
 // Subscribe <-> Unsubscribe (by subscription ID)
 // Register <-> Unregister (by registration ID)
 // Call <-> Invocation <-> Yield/Error <-> Result/Error (by invocation ID)
+//
+// AdditionalMessages: # of additional messages generated as a result of the
+// received message.  This is currently only non-zero for Call and Publish
+// messages.  For Call, it is one if an invocation was sent to a registered
+// procedure.  For Publish, it is the number of subscribers who should receive
+// the event.
 type MessageEffect struct {
 	Endpoint   string
 	Response   string
 	InternalID ID
 	Error      string
+	AdditionalMessages int
 }
 
 func NewMessageEffect(endpoint URI, response string, internalID ID) *MessageEffect {
@@ -516,6 +523,7 @@ func NewMessageEffect(endpoint URI, response string, internalID ID) *MessageEffe
 		Endpoint:   string(endpoint),
 		Response:   response,
 		InternalID: internalID,
+		AdditionalMessages: 0,
 	}
 }
 
@@ -525,6 +533,7 @@ func NewErrorMessageEffect(endpoint URI, err URI, internalID ID) *MessageEffect 
 		Response:   "Error",
 		InternalID: internalID,
 		Error:      string(err),
+		AdditionalMessages: 0,
 	}
 }
 

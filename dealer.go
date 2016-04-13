@@ -320,7 +320,10 @@ func (d *defaultDealer) resolveCall(caller Sender, msg *Call) *MessageEffect {
 				Arguments:    args,
 				ArgumentsKw:  kwargs,
 			})
-			return NewMessageEffect(msg.Procedure, "", invocationID)
+
+			result := NewMessageEffect(msg.Procedure, "", invocationID)
+			result.AdditionalMessages = 1
+			return result
 		}
 	}
 }
@@ -813,7 +816,10 @@ func (d *redisDealer) finishCall(caller Sender, msg *Call, rproc *registrationIn
 		Arguments:    args,
 		ArgumentsKw:  kwargs,
 	})
-	return NewMessageEffect(msg.Procedure, "", invocationID)
+
+	result := NewMessageEffect(msg.Procedure, "", invocationID)
+	result.AdditionalMessages = 1
+	return result
 }
 
 func (d *redisDealer) Call(caller Sender, msg *Call) *MessageEffect {

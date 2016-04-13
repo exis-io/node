@@ -78,6 +78,7 @@ func (br *defaultBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 	}
 
 	result := NewMessageEffect(msg.Topic, "", pubId)
+	result.AdditionalMessages = len(subs)
 
 	// only send published message if acknowledge is present and set to true
 	if doPub, _ := msg.Options["acknowledge"].(bool); doPub {
@@ -399,9 +400,13 @@ func (br *redisBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 		Details:     make(map[string]interface{}),
 	}
 
+	result := NewMessageEffect(msg.Topic, "", pubId)
+
 	iter := GetSubscriptions(br.node.RedisPool, msg.Topic)
 	for iter.Next() {
 		sub := iter.Value()
+
+		result.AdditionalMessages++
 
 		receiver, ok := br.node.GetSession(ID(sub.SessionID))
 		if ok {
@@ -415,8 +420,6 @@ func (br *redisBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 		}
 	}
 	iter.Close()
-
-	result := NewMessageEffect(msg.Topic, "", pubId)
 
 	// only send published message if acknowledge is present and set to true
 	if doPub, _ := msg.Options["acknowledge"].(bool); doPub {
