@@ -22,16 +22,15 @@ type NodeConfig struct {
 	Servers            []ServerConfig
 	RedisServer        string
 	RedisPassword      string
+
+	// Config file location, saved in case we need to reload.
+	path               string
 }
 
 func LoadConfig(path string) (*NodeConfig, error) {
-	file, err := ioutil.ReadFile(path)
-	if err != nil {
-		out.Critical("Loading configuration file failed: %s", err)
-		return nil, err
-	}
-
 	var config NodeConfig
+
+	config.path = path
 
 	// Default values
 	config.Agent = "xs.node"
@@ -50,14 +49,10 @@ func LoadConfig(path string) (*NodeConfig, error) {
 	config.RedisServer = ""
 	config.RedisPassword = ""
 
-	err = json.Unmarshal(file, &config)
-	if err != nil {
-		out.Critical("Parsing configuration file failed: %s", err)
-		return nil, err
-	}
+	out.Debug("Loading configuration file: %s", path)
+	err := config.Reload()
 
-	out.Debug("Loaded configuration file: %s", path)
-	return &config, nil
+	return &config, err
 }
 
 // Get request limit from configuration file.
@@ -81,4 +76,20 @@ func (config *NodeConfig) GetRequestLimit(domain string) int {
 
 	out.Critical("No default request limit defined: returning 1")
 	return 1
+}
+
+func (config *NodeConfig) Reload() error {
+	file, err := ioutil.ReadFile(config.path)
+	if err != nil {
+		out.Critical("Loading configuration file failed: %s", err)
+		return err
+	}
+
+	err = json.Unmarshal(file, config)
+	if err != nil {
+		out.Critical("Parsing configuration file failed: %s", err)
+		return err
+	}
+
+	return nil
 }

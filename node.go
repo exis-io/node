@@ -125,15 +125,11 @@ func (node *node) Listen(sess *Session) {
 
 	node.SendJoinNotification(sess)
 
-	limit := node.Config.GetRequestLimit(sess.authid)
-	limiter := NewBasicLimiter(limit)
-	out.Debug("Request rate limit for %s: %d/s", sess, limit)
-
 	for {
 		var open bool
 		var msg Message
 
-		limiter.Acquire()
+		sess.limiter.Acquire()
 
 		select {
 		case msg, open = <-c:
@@ -301,6 +297,11 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	// Hello-Welcome exchange.
 	effect := NewMessageEffect("", "Welcome", sess.Id)
 	n.stats.LogMessage(&sess, handled, effect)
+
+	// Prepare rate limiter for the session.
+	limit := n.Config.GetRequestLimit(sess.authid)
+	sess.limiter = NewBasicLimiter(limit)
+	out.Debug("Request rate limit for %s: %d/s", sess, limit)
 
 	return sess, nil
 }
@@ -572,6 +573,25 @@ func (node *node) EvictDomain(domain string) int {
 	for _, sess := range node.sessions {
 		if subdomain(domain, string(sess.pdid)) {
 			sess.kill <- ErrSessionEvicted
+			count++
+		}
+	}
+
+	return count
+}
+
+// Find all sessions under a domain and update them.
+// This just updates their rate limits right now.
+func (node *node) RefreshDomain(domain string) int {
+	count := 0
+
+	node.sessionLock.Lock()
+	defer node.sessionLock.Unlock()
+
+	for _, sess := range node.sessions {
+		if subdomain(domain, string(sess.pdid)) {
+			limit := node.Config.GetRequestLimit(sess.authid)
+			sess.limiter.SetLimit(limit)
 			count++
 		}
 	}

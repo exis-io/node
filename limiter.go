@@ -7,6 +7,7 @@ import (
 type Limiter interface {
 	Acquire()
 	Refresh()
+	SetLimit(int)
 }
 
 type BasicLimiter struct {
@@ -18,8 +19,8 @@ type BasicLimiter struct {
 	throttle chan int
 }
 
-func NewBasicLimiter(limit int) BasicLimiter {
-	limiter := BasicLimiter{
+func NewBasicLimiter(limit int) *BasicLimiter {
+	limiter := &BasicLimiter{
 		limit:       limit,
 		available:   limit,
 		windowStart: time.Now().Unix(),
@@ -55,4 +56,8 @@ func (limiter *BasicLimiter) Refresh() {
 		time.Sleep(time.Second)
 		limiter.throttle <- limiter.limit
 	}
+}
+
+func (limiter *BasicLimiter) SetLimit(limit int) {
+	limiter.limit = limit
 }

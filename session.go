@@ -36,6 +36,8 @@ type Session struct {
 	messageCounts map[string]int64
 
 	kill chan URI
+
+	limiter Limiter
 }
 
 func (s Session) String() string {
