@@ -212,8 +212,6 @@ func (n *node) handleExtraFields(sess *Session, extra map[string]interface{}) er
 
 // Handle a new Peer, creating and returning a session
 func (n *node) Handshake(client Peer) (Session, error) {
-	handled := NewHandledMessage("Hello")
-
 	sess := Session{
 		Peer:          client,
 		messageCounts: make(map[string]int64),
@@ -241,6 +239,8 @@ func (n *node) Handshake(client Peer) (Session, error) {
 
 		return sess, fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
+
+	handled := NewHandledMessage("Hello", GetMessageSize(msg))
 
 	sess.pdid = hello.Realm
 	sess.authid = string(hello.Realm)
@@ -329,7 +329,7 @@ func (n *node) SessionClose(sess *Session) {
 
 	// We log a special _Close message in case there was no Goodbye message
 	// associated with this session closing.
-	handled := NewHandledMessage("_Close")
+	handled := NewHandledMessage("_Close", 0)
 	effect := NewMessageEffect("", "", sess.Id)
 	n.stats.LogMessage(sess, handled, effect)
 }
@@ -404,7 +404,7 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
 
-	handled := NewHandledMessage(messageTypeString(*msg))
+	handled := NewHandledMessage(messageTypeString(*msg), GetMessageSize(*msg))
 	var effect *MessageEffect
 
 	n.LogMessage(msg, sess)

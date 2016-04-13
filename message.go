@@ -487,12 +487,14 @@ func (msg *Interrupt) MessageType() MessageType {
 type HandledMessage struct {
 	Time time.Time
 	Type string
+	Size int
 }
 
-func NewHandledMessage(mtype string) *HandledMessage {
+func NewHandledMessage(mtype string, size int) *HandledMessage {
 	return &HandledMessage{
 		Time: time.Now(),
 		Type: mtype,
+		Size: size,
 	}
 }
 
@@ -628,4 +630,23 @@ func messageTypeString(msg Message) string {
 func GetMessageVerb(msg Message) (string, bool) {
 	verb, ok := messageVerb[msg.MessageType()]
 	return verb, ok
+}
+
+// Get the size of the message (in bytes) as it would be on the wire.
+//
+// It assumes the serialization method is JSON and runs the serializer
+// in order to get the size.
+//
+// TODO: Refactor the node and eliminate this method.  The problem is that the
+// websocket code is decoupled from the code that handles WAMP messages.
+// Communication between the two parts is facilitated by channels that take the
+// Message interface, which is not very extensible.
+func GetMessageSize(msg Message) int {
+	serializer := JSONSerializer{}
+	data, _ := serializer.Serialize(msg)
+	if data == nil {
+		return -1
+	} else {
+		return len(data)
+	}
 }

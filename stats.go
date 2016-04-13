@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const messageLogHeader string = "time,type,authid,agent,endpoint,exchange,response,error\n"
+const messageLogHeader string = "time,type,authid,agent,endpoint,exchange,response,error,size,additional\n"
 
 type NodeStats struct {
 	startTime     int64
@@ -104,8 +104,16 @@ func (log *MessageLog) rotate() error {
 	return err
 }
 
+func QuoteString(s string) string {
+	if s != "" {
+		return "\"" + s + "\""
+	} else {
+		return ""
+	}
+}
+
 func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *MessageEffect) {
-	event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s\n",
+	event := fmt.Sprintf("%d.%09d,%s,%s,%s,%s,%x,%s,%s,%d,%d\n",
 		msg.Time.Unix(), msg.Time.Nanosecond(),
 		msg.Type,
 		sess.authid,
@@ -113,7 +121,9 @@ func (stats *NodeStats) LogMessage(sess *Session, msg *HandledMessage, effect *M
 		effect.Endpoint,
 		effect.InternalID,
 		effect.Response,
-		effect.Error)
+		QuoteString(effect.Error),
+		msg.Size,
+		effect.AdditionalMessages)
 
 	if stats.MessageLog.write != nil {
 		stats.MessageLog.write <- event
