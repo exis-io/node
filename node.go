@@ -129,7 +129,7 @@ func (node *node) Listen(sess *Session) {
 		var open bool
 		var msg Message
 
-		sess.limiter.Acquire()
+		sess.messageLimiter.Acquire(1)
 
 		select {
 		case msg, open = <-c:
@@ -299,9 +299,14 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	n.stats.LogMessage(&sess, handled, effect)
 
 	// Prepare rate limiter for the session.
-	limit := n.Config.GetRequestLimit(sess.authid)
-	sess.limiter = NewBasicLimiter(limit)
-	out.Debug("Request rate limit for %s: %d/s", sess, limit)
+	messageLimit := n.Config.GetRequestLimit(sess.authid)
+	sess.messageLimiter = NewBasicLimiter(messageLimit)
+
+	byteLimit := n.Config.ByteLimitMultiple * messageLimit
+	sess.byteLimiter = NewBasicLimiter(byteLimit)
+
+	out.Debug("Request rate limit for %s: %d msg/s, %d bytes/s", sess,
+			messageLimit, byteLimit)
 
 	return sess, nil
 }
@@ -404,8 +409,12 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// NOTE: there is a serious shortcoming here: How do we deal with WAMP messages with an
 	// implicit destination? Many of them refer to sessions, but do we want to store the session
 	// IDs with the ultimate PDID target, or just change the protocol?
+	messageSize := GetMessageSize(*msg)
 
-	handled := NewHandledMessage(messageTypeString(*msg), GetMessageSize(*msg))
+	// Throttle large messages here.
+	sess.byteLimiter.Acquire(messageSize)
+
+	handled := NewHandledMessage(messageTypeString(*msg), messageSize)
 	var effect *MessageEffect
 
 	n.LogMessage(msg, sess)
@@ -591,7 +600,8 @@ func (node *node) RefreshDomain(domain string) int {
 	for _, sess := range node.sessions {
 		if subdomain(domain, string(sess.pdid)) {
 			limit := node.Config.GetRequestLimit(sess.authid)
-			sess.limiter.SetLimit(limit)
+			sess.messageLimiter.SetLimit(limit)
+			sess.byteLimiter.SetLimit(limit * node.Config.ByteLimitMultiple)
 			count++
 		}
 	}

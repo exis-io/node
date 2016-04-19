@@ -37,7 +37,8 @@ type Session struct {
 
 	kill chan URI
 
-	limiter Limiter
+	messageLimiter Limiter
+	byteLimiter    Limiter
 }
 
 func (s Session) String() string {

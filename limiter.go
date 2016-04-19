@@ -5,8 +5,7 @@ import (
 )
 
 type Limiter interface {
-	Acquire()
-	Refresh()
+	Acquire(int)
 	SetLimit(int)
 }
 
@@ -15,8 +14,6 @@ type BasicLimiter struct {
 
 	available   int
 	windowStart int64
-
-	throttle chan int
 }
 
 func NewBasicLimiter(limit int) *BasicLimiter {
@@ -28,33 +25,35 @@ func NewBasicLimiter(limit int) *BasicLimiter {
 	return limiter
 }
 
-func (limiter *BasicLimiter) Acquire() {
-	if limiter.available > 0 {
-		limiter.available--
+func (limiter *BasicLimiter) Acquire(amount int) {
+	// Deduct the requested amount, then delay the request until available is
+	// positive again.
+	limiter.available -= amount
+	if limiter.available >= 0 {
 		return
 	}
 
-	if limiter.throttle == nil {
-		now := time.Now().Unix()
-		if (now - limiter.windowStart) >= 1 {
-			limiter.available = limiter.limit - 1
-			limiter.windowStart = now
-		} else {
-			// Exceeded limit within time window.
-			// Add it to the throttle list.
-			limiter.throttle = make(chan int)
-			go limiter.Refresh()
-		}
-	} else {
-		allowed := <-limiter.throttle
-		limiter.available += allowed - 1
+	// Add the time since the last request.
+	now := time.Now().Unix()
+	elapsed := int(now - limiter.windowStart)
+	if elapsed >= 1 {
+		limiter.available += elapsed * limiter.limit
+		limiter.windowStart = now
 	}
-}
 
-func (limiter *BasicLimiter) Refresh() {
-	for {
+	// If it's still negative, we have to introduce delay.
+	for limiter.available < 0 {
 		time.Sleep(time.Second)
-		limiter.throttle <- limiter.limit
+		limiter.available += limiter.limit
+
+		// If we do not move the window, they will get to double-dip next time
+		// when we compute (elapsed = now - windowStart).
+		limiter.windowStart++
+	}
+
+	// Do not allow for accumulation of a surplus.
+	if limiter.available > limiter.limit {
+		limiter.available = limiter.limit
 	}
 }
 

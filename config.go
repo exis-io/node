@@ -23,6 +23,9 @@ type NodeConfig struct {
 	RedisServer        string
 	RedisPassword      string
 
+	// Byte rate limit will be this multiple of message rate limit.
+	ByteLimitMultiple  int
+
 	// Config file location, saved in case we need to reload.
 	path               string
 }
@@ -48,6 +51,7 @@ func LoadConfig(path string) (*NodeConfig, error) {
 	}
 	config.RedisServer = ""
 	config.RedisPassword = ""
+	config.ByteLimitMultiple = 1000
 
 	out.Debug("Loading configuration file: %s", path)
 	err := config.Reload()

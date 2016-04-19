@@ -7,7 +7,7 @@
         ["xs.demo.Launcher", 100],
         ["xs.demo.Limiter", 100],
         ["xs.demo.Registrar", 100],
-        ["xs.demo", 20],
+        ["xs.demo", 12],
         ["xs.node", 1000],
         ["xs", 100],
         ["", 10]
@@ -23,5 +23,6 @@
         "Port": 8000
     }],
     "RedisServer": "",
-    "RedisPassword": ""
+    "RedisPassword": "",
+    "ByteLimitMultiple": 10
 }
