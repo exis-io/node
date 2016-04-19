@@ -6,6 +6,7 @@
         ["xs.demo.Bouncer", 100],
         ["xs.demo.Launcher", 100],
         ["xs.demo.Limiter", 100],
+        ["xs.demo.NodeLogger", 100],
         ["xs.demo.Registrar", 100],
         ["xs.demo", 12],
         ["xs.node", 1000],
