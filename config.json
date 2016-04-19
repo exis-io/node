@@ -25,5 +25,5 @@
     }],
     "RedisServer": "",
     "RedisPassword": "",
-    "ByteLimitMultiple": 10
+    "ByteLimitMultiple": 1000
 }
