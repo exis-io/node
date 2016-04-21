@@ -3,7 +3,7 @@ package node
 import (
 	"os"
 
-	"github.com/op/go-logging"
+	"gopkg.in/op/go-logging.v1"
 )
 
 // Check out their github page for more info on the coloring
