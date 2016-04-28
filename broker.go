@@ -70,7 +70,12 @@ func (br *defaultBroker) Publish(pub Sender, msg *Publish) *MessageEffect {
 	}
 	br.subMutex.Unlock()
 
+	size := GetMessageSize(&evtTemplate)
 	for id, sub := range subs {
+		// Count every event message against the publisher's rate limit.
+		// This can sleep, so make sure it's outside any locks.
+		pub.Throttle(1, size)
+
 		// shallow-copy the template
 		event := evtTemplate
 		event.Subscription = id

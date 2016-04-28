@@ -129,8 +129,6 @@ func (node *node) Listen(sess *Session) {
 		var open bool
 		var msg Message
 
-		sess.messageLimiter.Acquire(1)
-
 		select {
 		case msg, open = <-c:
 			if !open {
@@ -306,7 +304,7 @@ func (n *node) Handshake(client Peer) (Session, error) {
 	sess.byteLimiter = NewBasicLimiter(byteLimit)
 
 	out.Debug("Request rate limit for %s: %d msg/s, %d bytes/s", sess,
-			messageLimit, byteLimit)
+		messageLimit, byteLimit)
 
 	return sess, nil
 }
@@ -411,8 +409,8 @@ func (n *node) Handle(msg *Message, sess *Session) {
 	// IDs with the ultimate PDID target, or just change the protocol?
 	messageSize := GetMessageSize(*msg)
 
-	// Throttle large messages here.
-	sess.byteLimiter.Acquire(messageSize)
+	// Enforce rate limit on message processing.
+	sess.Throttle(1, messageSize)
 
 	handled := NewHandledMessage(messageTypeString(*msg), messageSize)
 	var effect *MessageEffect

@@ -313,13 +313,20 @@ func (d *defaultDealer) resolveCall(caller Sender, msg *Call) *MessageEffect {
 			}
 			d.requestMutex.Unlock()
 
-			rproc.Receiver.Send(&Invocation{
+			invocation := &Invocation{
 				Request:      invocationID,
 				Registration: reg,
 				Details:      msg.Options,
 				Arguments:    args,
 				ArgumentsKw:  kwargs,
-			})
+			}
+
+			// Count the invocation against the caller's rate limit.
+			// This can sleep, so make sure it's outside any locks.
+			size := GetMessageSize(invocation)
+			caller.Throttle(1, size)
+
+			rproc.Receiver.Send(invocation)
 
 			result := NewMessageEffect(msg.Procedure, "", invocationID)
 			result.AdditionalMessages = 1

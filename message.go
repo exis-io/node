@@ -513,28 +513,28 @@ func NewHandledMessage(mtype string, size int) *HandledMessage {
 // procedure.  For Publish, it is the number of subscribers who should receive
 // the event.
 type MessageEffect struct {
-	Endpoint   string
-	Response   string
-	InternalID ID
-	Error      string
+	Endpoint           string
+	Response           string
+	InternalID         ID
+	Error              string
 	AdditionalMessages int
 }
 
 func NewMessageEffect(endpoint URI, response string, internalID ID) *MessageEffect {
 	return &MessageEffect{
-		Endpoint:   string(endpoint),
-		Response:   response,
-		InternalID: internalID,
+		Endpoint:           string(endpoint),
+		Response:           response,
+		InternalID:         internalID,
 		AdditionalMessages: 0,
 	}
 }
 
 func NewErrorMessageEffect(endpoint URI, err URI, internalID ID) *MessageEffect {
 	return &MessageEffect{
-		Endpoint:   string(endpoint),
-		Response:   "Error",
-		InternalID: internalID,
-		Error:      string(err),
+		Endpoint:           string(endpoint),
+		Response:           "Error",
+		InternalID:         internalID,
+		Error:              string(err),
 		AdditionalMessages: 0,
 	}
 }

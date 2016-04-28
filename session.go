@@ -51,6 +51,11 @@ func (s *Session) isLocal() bool {
 	return ok
 }
 
+func (s *Session) Throttle(messages int, bytes int) {
+	s.messageLimiter.Acquire(messages)
+	s.byteLimiter.Acquire(bytes)
+}
+
 // localPipe creates two linked sessions. Messages sent to one will
 // appear in the Receive of the other. This is useful for implementing
 // client sessions
@@ -84,6 +89,10 @@ func (s *localPeer) Send(msg Message) error {
 	return nil
 }
 
+func (s *localPeer) Throttle(messages int, bytes int) {
+	return
+}
+
 func (s *localPeer) Close() error {
 	close(s.outgoing)
 	return nil
@@ -100,6 +109,9 @@ func (s *localPeer) Close() error {
 type Sender interface {
 	// Send a message to the peer
 	Send(Message) error
+
+	// Apply rate limit (# messages, # bytes).
+	Throttle(int, int)
 }
 
 // Peer is the interface that must be implemented by all WAMP peers.

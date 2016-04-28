@@ -64,6 +64,11 @@ func (ep *websocketPeer) Send(msg Message) error {
 	ep.connLock.Unlock()
 	return err
 }
+
+func (s *websocketPeer) Throttle(messages int, bytes int) {
+	return
+}
+
 func (ep *websocketPeer) Receive() <-chan Message {
 	return ep.messages
 }
